@@ -1,0 +1,51 @@
+[package]
+name = "sub2api_mini"
+version = "0.2.62"
+edition = "2024"
+
+[dependencies]
+aes-gcm = "0.10"
+argon2 = "0.5"
+async-stream = "0.3"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tracing"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+cron = "0.17"
+dotenvy = "0.15"
+futures-util = "0.3"
+getrandom = "0.3"
+hex = "0.4"
+hmac = "0.12"
+http = "1"
+ipnet = "2"
+percent-encoding = "2"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks"] }
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+sha1 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+subtle = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tower-http = { version = "0.6", features = ["request-id", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "z"
+panic = "abort"
+strip = "symbols"
