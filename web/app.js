@@ -8,6 +8,7 @@ role: null,
 siteName: "Sub2API Mini",
 siteSubtitle: "个人 AI API 网关",
 siteLogo: "/logo.svg",
+version: "",
 contactInfo: "",
 docUrl: "",
 homeContent: "",
@@ -55,19 +56,58 @@ profile: { label: "个人资料", render: renderProfile },
 "email-verify": { label: "验证邮箱", render: renderEmailVerification, hidden: true },
 status: { label: "服务状态", render: renderStatus },
 };
+const routeIcons = {
+overview: "grid", opsAdmin: "activity", users: "users", accounts: "globe",
+proxies: "server", keys: "key", batchImages: "image", models: "box",
+channels: "radio", monitor: "activity", usage: "chart", announcements: "bell",
+pages: "file", subscriptions: "badge", redeem: "ticket", content: "bell",
+settings: "settings", audit: "shield", groups: "folder", channelsAdmin: "tag",
+plans: "badge", redeemAdmin: "ticket", ordersAdmin: "receipt",
+monitorAdmin: "activity", riskAdmin: "shield", promptAuditAdmin: "fileSearch",
+profile: "user", status: "activity",
+};
+const iconShapes = {
+grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/>',
+server: '<rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
+key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15 5l4 4"/>',
+image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+box: '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>',
+radio: '<path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9M7.8 16.2a6 6 0 0 1 0-8.5M19.1 4.9c3.9 3.9 3.9 10.3 0 14.2M16.2 7.8a6 6 0 0 1 0 8.5"/><circle cx="12" cy="12" r="2"/>',
+chart: '<path d="M3 3v18h18M7 16l4-4 4 3 5-7"/>',
+bell: '<path d="M10.3 21a2 2 0 0 0 3.4 0M18 8A6 6 0 0 0 6 8c0 7-3 7-3 9h18c0-2-3-2-3-9"/>',
+file: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/>',
+badge: '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a2 2 0 0 0-1.17 1.51L.5 16.9a2 2 0 0 0 .83 1.83l7.64 5.08a2 2 0 0 0 2.06 0l7.64-5.08a2 2 0 0 0 .83-1.83l-.93-9.31a2 2 0 0 0-1.17-1.51l-8.57-3.9Z" transform="scale(.9) translate(1.3 0)"/><path d="m9 12 2 2 4-4"/>',
+ticket: '<path d="M2 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2M13 17v2M13 11v2"/>',
+settings: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/>',
+shield: '<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/><path d="m9 12 2 2 4-4"/>',
+folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+tag: '<path d="M12.6 2.4a2 2 0 0 0-1.4-.6H4a2 2 0 0 0-2 2V11a2 2 0 0 0 .6 1.4l8 8a2 2 0 0 0 2.8 0l7-7a2 2 0 0 0 0-2.8Z"/><circle cx="7" cy="7" r="1"/>',
+receipt: '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6M16 12h-6M13 16h-3"/>',
+fileSearch: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7"/><polyline points="14 2 14 8 20 8"/><circle cx="18" cy="18" r="3"/><path d="m20.2 20.2 1.8 1.8"/>',
+user: '<circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/>',
+menu: '<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>',
+chevron: '<path d="m9 18 6-6-6-6"/>',
+chevronDown: '<path d="m6 9 6 6 6-6"/>',
+panelClose: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M16 9l-3 3 3 3"/>',
+panelOpen: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M14 9l3 3-3 3"/>',
+logout: '<path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
+};
 const adminNavigation = [
 { key: "overview" },
 { key: "opsAdmin" },
 { key: "users" },
 { key: "groups" },
-{ group: "channel-management", label: "频道管理", children: [
+{ group: "channel-management", label: "频道管理", icon: "radio", children: [
   { key: "channelsAdmin" }, { key: "monitorAdmin" },
 ] },
 { key: "plans", label: "订阅管理" },
 { key: "accounts" },
 { key: "content" },
 { key: "proxies" },
-{ group: "security-audit", label: "安全审计", children: [
+{ group: "security-audit", label: "安全审计", icon: "shield", children: [
   { key: "riskAdmin" }, { key: "promptAuditAdmin" },
 ] },
 { key: "redeemAdmin" },
@@ -79,7 +119,7 @@ const adminNavigation = [
 const selfNavigation = [
 { key: "keys" },
 { key: "batchImages" },
-{ group: "api-resources", label: "API 资源", children: [
+{ group: "api-resources", label: "API 资源", icon: "box", children: [
   { key: "models" }, { key: "channels" }, { key: "monitor" },
 ] },
 { key: "subscriptions" },
@@ -94,6 +134,7 @@ const userNavigation = [
 ];
 const expandedNavGroups = new Set();
 let mobileNavigationOpen = false;
+let sidebarCollapsed = localStorage.getItem("mini_sidebar_collapsed") === "true";
 let currentKeys = [];
 let currentKeyOwners = [];
 let selectedKeyIds = new Set();
@@ -145,6 +186,7 @@ try {
   state.siteName = settings.data.site_name || state.siteName;
   state.siteSubtitle = settings.data.site_subtitle || state.siteSubtitle;
   state.siteLogo = settings.data.site_logo || state.siteLogo;
+  state.version = settings.data.version || "";
   state.contactInfo = settings.data.contact_info || "";
   state.docUrl = settings.data.doc_url || "";
   state.homeContent = settings.data.home_content || "";
@@ -553,7 +595,7 @@ return items.flatMap(item => {
 function navigationSections(allowed) {
 if (state.role === "admin") {
   return [
-    { id: "admin", label: "管理后台", items: resolveNavigationItems(adminNavigation, allowed) },
+    { id: "admin", label: "", items: resolveNavigationItems(adminNavigation, allowed) },
     { id: "self", label: "我的账户", items: resolveNavigationItems(selfNavigation, allowed) },
   ];
 }
@@ -565,16 +607,23 @@ return item.children?.some(child => child.key === routeName) || false;
 function navigationGroupExpanded(item, routeName) {
 return expandedNavGroups.has(item.group) || navigationGroupActive(item, routeName);
 }
+function appIcon(name, className = "") {
+const shape = iconShapes[name] || iconShapes.file;
+return `<svg class="app-icon ${className}" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${shape}</svg>`;
+}
+function navigationIcon(item) {
+return appIcon(item.icon || routeIcons[item.key] || "file", "nav-icon");
+}
 function renderNavigationItems(items, routeName) {
 return items.map(item => {
   if (item.key) {
     const active = item.key === routeName;
-    return `<a href="#/${item.key}" data-route="${item.key}" ${active ? 'class="active" aria-current="page"' : ""}>${escapeHtml(item.label)}</a>`;
+    return `<a href="#/${item.key}" data-route="${item.key}" title="${escapeHtml(item.label)}" ${active ? 'class="active" aria-current="page"' : ""}>${navigationIcon(item)}<span class="nav-label">${escapeHtml(item.label)}</span></a>`;
   }
   const active = navigationGroupActive(item, routeName);
   const expanded = navigationGroupExpanded(item, routeName);
   return `<div class="nav-group ${active ? "active" : ""}" data-nav-group="${escapeHtml(item.group)}">
-    <button class="nav-group-toggle" type="button" data-nav-group-toggle="${escapeHtml(item.group)}" aria-expanded="${expanded}"><span>${escapeHtml(item.label)}</span><span class="nav-chevron" aria-hidden="true">⌄</span></button>
+    <button class="nav-group-toggle" type="button" data-nav-group-toggle="${escapeHtml(item.group)}" aria-expanded="${expanded}" title="${escapeHtml(item.label)}">${navigationIcon(item)}<span class="nav-label">${escapeHtml(item.label)}</span>${appIcon("chevronDown", "nav-chevron")}</button>
     <div class="nav-children" data-nav-group-children="${escapeHtml(item.group)}" ${expanded ? "" : "hidden"}>${renderNavigationItems(item.children, routeName)}</div>
   </div>`;
 }).join("");
@@ -589,6 +638,7 @@ if (overlay) overlay.hidden = !mobileNavigationOpen;
 toggle?.setAttribute("aria-expanded", String(mobileNavigationOpen));
 }
 function toggleNavigationGroup(event) {
+if (sidebarCollapsed) return;
 const groupId = event.currentTarget.dataset.navGroupToggle;
 const children = document.querySelector(`[data-nav-group-children="${groupId}"]`);
 const expanded = event.currentTarget.getAttribute("aria-expanded") === "true";
@@ -596,28 +646,83 @@ if (expanded) expandedNavGroups.delete(groupId); else expandedNavGroups.add(grou
 event.currentTarget.setAttribute("aria-expanded", String(!expanded));
 if (children) children.hidden = expanded;
 }
+function identityInitials() {
+const value = String(state.displayName || state.user || "U").trim();
+return Array.from(value).slice(0, 2).join("").toUpperCase();
+}
+function setSidebarCollapsed(collapsed) {
+sidebarCollapsed = Boolean(collapsed);
+localStorage.setItem("mini_sidebar_collapsed", String(sidebarCollapsed));
+const shell = document.querySelector(".app-shell");
+const button = document.querySelector("#sidebar-collapse");
+shell?.classList.toggle("sidebar-collapsed", sidebarCollapsed);
+button?.setAttribute("aria-expanded", String(!sidebarCollapsed));
+button?.setAttribute("title", sidebarCollapsed ? "展开菜单" : "折叠菜单");
+if (button) button.innerHTML = `${appIcon(sidebarCollapsed ? "panelOpen" : "panelClose")}<span>${sidebarCollapsed ? "展开菜单" : "折叠菜单"}</span>`;
+}
+function setAccountMenu(open) {
+const menu = document.querySelector("#account-dropdown");
+const toggle = document.querySelector("#account-toggle");
+if (menu) menu.hidden = !open;
+toggle?.setAttribute("aria-expanded", String(Boolean(open)));
+}
+function syncPageChrome(route) {
+const header = document.querySelector("#page .page-header");
+const title = header?.querySelector("h1")?.textContent?.trim() || route.label;
+const description = header?.querySelector("p")?.textContent?.trim() || "";
+const topTitle = document.querySelector("#topbar-title");
+const topDescription = document.querySelector("#topbar-description");
+if (topTitle) topTitle.textContent = title;
+if (topDescription) {
+  topDescription.textContent = description;
+  topDescription.hidden = !description;
+}
+document.title = `${title} · ${state.siteName}`;
+if (header) {
+  header.classList.add("page-header-synced");
+  header.classList.toggle("topbar-only", !header.querySelector(".actions"));
+}
+}
 function renderShell() {
 const allowed = new Map(activeRoutes().filter(([, route]) => !route.hidden));
 const routeName = currentRouteName();
 const sections = navigationSections(allowed);
+const initialRoute = allowed.get(routeName) || routes.overview;
+const roleLabel = state.role === "admin" ? "管理员" : "用户";
 app.innerHTML = `
-  <div class="mobile-topbar"><a href="#/overview"><img src="${siteLogo()}" alt=""><strong>${escapeHtml(state.siteName)}</strong></a><button id="mobile-nav-toggle" type="button" aria-label="打开主导航" aria-expanded="false">☰</button></div>
   <div id="mobile-nav-overlay" class="mobile-nav-overlay" hidden></div>
-  <div class="app-shell">
+  <div class="app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}">
     <aside class="sidebar">
-      <a class="brand" href="#/overview"><img src="${siteLogo()}" alt=""><span>${escapeHtml(state.siteName)}<small>${state.role === "admin" ? "ADMIN GATEWAY" : "USER GATEWAY"}</small></span></a>
+      <div class="sidebar-header"><a class="brand" href="#/overview" title="${escapeHtml(state.siteName)}"><img src="${siteLogo()}" alt=""><span>${escapeHtml(state.siteName)}<small>${state.version ? `v${escapeHtml(state.version)} · ` : ""}MINI</small></span></a></div>
       <nav class="nav-list" aria-label="主导航">
-        ${sections.map(section => `<section class="nav-section" data-nav-section="${section.id}"><h2>${escapeHtml(section.label)}</h2>${renderNavigationItems(section.items, routeName)}</section>`).join("")}
+        ${sections.map(section => `<section class="nav-section" data-nav-section="${section.id}">${section.label ? `<h2>${escapeHtml(section.label)}</h2>` : ""}${renderNavigationItems(section.items, routeName)}</section>`).join("")}
       </nav>
-      <div class="sidebar-footer"><span>${escapeHtml(state.displayName || state.user || "")}</span><button id="logout-button" type="button">退出登录</button></div>
+      <div class="sidebar-footer"><button id="sidebar-collapse" class="sidebar-control" type="button" aria-expanded="${!sidebarCollapsed}" title="${sidebarCollapsed ? "展开菜单" : "折叠菜单"}">${appIcon(sidebarCollapsed ? "panelOpen" : "panelClose")}<span>${sidebarCollapsed ? "展开菜单" : "折叠菜单"}</span></button></div>
     </aside>
-    <main class="workspace"><div id="page" class="page"></div></main>
+    <div class="main-area">
+      <header class="app-topbar">
+        <div class="topbar-mobile-brand"><button id="mobile-nav-toggle" class="icon-button" type="button" aria-label="打开主导航" aria-expanded="false">${appIcon("menu")}</button><a href="#/overview"><img src="${siteLogo()}" alt=""><strong>${escapeHtml(state.siteName)}</strong></a></div>
+        <div class="topbar-page"><h1 id="topbar-title">${escapeHtml(initialRoute.label)}</h1><p id="topbar-description" hidden></p></div>
+        <div class="account-menu">
+          <button id="account-toggle" class="account-toggle" type="button" aria-label="用户菜单" aria-expanded="false"><span class="account-avatar">${escapeHtml(identityInitials())}</span><span class="account-copy"><strong>${escapeHtml(state.displayName || state.user || "")}</strong><small>${roleLabel}</small></span>${appIcon("chevronDown", "account-chevron")}</button>
+          <div id="account-dropdown" class="account-dropdown" hidden><div class="account-dropdown-head"><strong>${escapeHtml(state.displayName || state.user || "")}</strong><span>${roleLabel}</span></div><a href="#/profile">${appIcon("user")}<span>个人资料</span></a><a href="#/keys">${appIcon("key")}<span>API Key</span></a><button id="logout-button" type="button">${appIcon("logout")}<span>退出登录</span></button></div>
+        </div>
+      </header>
+      <main class="workspace"><div id="page" class="page"></div></main>
+    </div>
   </div>`;
 document.querySelector("#logout-button")?.addEventListener("click", logout);
 document.querySelector("#mobile-nav-toggle")?.addEventListener("click", () => setMobileNavigation(!mobileNavigationOpen));
 document.querySelector("#mobile-nav-overlay")?.addEventListener("click", () => setMobileNavigation(false));
+document.querySelector("#sidebar-collapse")?.addEventListener("click", () => setSidebarCollapsed(!sidebarCollapsed));
+document.querySelector("#account-toggle")?.addEventListener("click", event => {
+  event.stopPropagation();
+  const menu = document.querySelector("#account-dropdown");
+  setAccountMenu(Boolean(menu?.hidden));
+});
+document.querySelector(".workspace")?.addEventListener("click", () => setAccountMenu(false));
 document.querySelectorAll("[data-nav-group-toggle]").forEach(button => button.addEventListener("click", toggleNavigationGroup));
-document.querySelectorAll(".nav-list a").forEach(link => link.addEventListener("click", () => setMobileNavigation(false)));
+document.querySelectorAll(".nav-list a, .account-dropdown a").forEach(link => link.addEventListener("click", () => { setMobileNavigation(false); setAccountMenu(false); }));
 setMobileNavigation(false);
 }
 async function renderRoute() {
@@ -646,6 +751,7 @@ if (!page) return;
 page.innerHTML = `<div class="boot-screen"><p>正在载入</p></div>`;
 try {
   await route.render(page);
+  syncPageChrome(route);
   if (state.user && routeName !== "announcements") {
     try {
       await loadFeatureScript("engagement");
@@ -661,6 +767,7 @@ try {
 } catch (error) {
   if (error.status === 401) return renderLogin("会话已过期，请重新登录");
   page.innerHTML = emptyState("载入失败", error.message, "重新载入", "reload-route");
+  syncPageChrome(route);
   document.querySelector("#reload-route")?.addEventListener("click", renderRoute);
 }
 }
