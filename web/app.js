@@ -1428,7 +1428,7 @@ if (!Number.isFinite(amount) || amount < 0 || amount > 1000000000) throw new Err
 return Math.round(amount * 1000000);
 }
 function microusdInput(value) { return String((Number(value) || 0) / 1000000); }
-function formatMicrousd(value) { return `$${((Number(value) || 0) / 1000000).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`; }
+function formatMicrousd(value) { return `$${((Number(value) || 0) / 1000000).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function limitProgress(used, limit) { return Number(limit) > 0 ? `${formatMicrousd(used)} / ${formatMicrousd(limit)}` : "无限"; }
 function groupOptions(selected = 0) {
 return `<option value="0" ${!selected ? "selected" : ""}>未分组（全部账号）</option>${currentGroups.map(group => `<option value="${group.id}" ${String(selected) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}`;
@@ -2743,7 +2743,7 @@ function status(label, tone = "") { return `<span class="status ${tone}">${escap
 function emptyState(title, text, buttonText = "", buttonId = "") { return `<section class="empty"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(text)}</p>${buttonText ? `<button class="button" id="${buttonId}">${escapeHtml(buttonText)}</button>` : ""}</section>`; }
 function formatNumber(value) { return new Intl.NumberFormat("zh-CN", { notation: Number(value) > 9999 ? "compact" : "standard" }).format(Number(value) || 0); }
 function formatMoney(cents) { return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" }).format((Number(cents) || 0) / 100); }
-function formatUsdMicros(value) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 6 }).format((Number(value) || 0) / 1000000); }
+function formatUsdMicros(value) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((Number(value) || 0) / 1000000); }
 function formatDate(value) { if (!value) return "-"; const parsed = new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`); return Number.isNaN(parsed.valueOf()) ? value : new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(parsed); }
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); if (Number.isNaN(date.valueOf())) return ""; const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000); return local.toISOString().slice(0, 16); }
 function parseModelList(value) { return String(value || "").split(/[\n,]/).map(item => item.trim()).filter(Boolean); }
