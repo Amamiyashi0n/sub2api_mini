@@ -23,7 +23,6 @@ registrationEnabled: false,
 emailVerificationEnabled: false,
 passwordResetEnabled: true,
 mailConfigured: false,
-oauthProviders: [],
 turnstileEnabled: false,
 turnstileSiteKey: "",
 };
@@ -205,7 +204,6 @@ try {
   state.emailVerificationEnabled = Boolean(settings.data.email_verification_enabled);
   state.passwordResetEnabled = Boolean(settings.data.password_reset_enabled);
   state.mailConfigured = Boolean(settings.data.mail_configured);
-  state.oauthProviders = Array.isArray(settings.data.oauth_providers) ? settings.data.oauth_providers : [];
   state.turnstileEnabled = Boolean(settings.data.turnstile_enabled && settings.data.turnstile_site_key);
   state.turnstileSiteKey = settings.data.turnstile_site_key || "";
   document.title = state.siteName;
@@ -229,10 +227,6 @@ if (routeName === "key-usage") {
 }
 if (routeName === "home") {
   await renderPublicHome();
-  return;
-}
-if (routeName === "oauth-result") {
-  await renderOAuthResult();
   return;
 }
 if (routeName.startsWith("page/")) {
@@ -345,7 +339,6 @@ app.innerHTML = `
           <button class="button" type="submit">登录</button>
           <p id="login-error" class="form-error">${escapeHtml(message)}</p>
         </form>
-        ${oauthLoginButtons()}
         <div class="login-links"><a class="text-link" href="#/home">公共首页</a><a class="text-link" href="#/key-usage">查询 API Key 用量</a>${state.registrationEnabled ? '<a class="text-link" href="#/register">注册账户</a>' : ""}${state.passwordResetEnabled && state.mailConfigured ? '<a class="text-link" href="#/forgot-password">忘记密码</a>' : ""}</div>
       </div>
     </section>
@@ -353,34 +346,12 @@ app.innerHTML = `
 document.querySelector("#login-form").addEventListener("submit", handleLogin);
 mountTurnstile(document.querySelector("#login-form"));
 }
-function oauthLoginButtons() {
-if (!state.oauthProviders.length) return "";
-return `<div class="oauth-login"><span>或使用第三方身份</span>${state.oauthProviders.map(provider => `<a class="button secondary" href="/api/auth/oauth/${encodeURIComponent(provider.provider)}/start">使用 ${escapeHtml(provider.name)} 登录</a>`).join("")}</div>`;
-}
 function turnstileField() { return state.turnstileEnabled ? '<input name="turnstile_token" type="hidden"><div class="turnstile-slot" data-turnstile-slot></div>' : ""; }
 function mountTurnstile(form) {
 if (!state.turnstileEnabled || !form) return;
 loadFeatureScript("turnstile").then(() => window.Sub2MiniTurnstile.mount(form, state.turnstileSiteKey)).catch(error => { const output = form.querySelector(".form-error"); if (output) output.textContent = error.message; });
 }
 function resetTurnstile(form) { if (state.turnstileEnabled) window.Sub2MiniTurnstile?.reset(form); }
-async function renderOAuthResult() {
-const params = new URLSearchParams(location.hash.split("?", 2)[1] || "");
-const token = params.get("token");
-if (params.get("status") === "pending" && token) {
-  await loadFeatureScript("identity");
-  await window.Sub2MiniIdentity.renderPendingOAuth(token);
-  return;
-}
-const code = params.get("code") || "OAUTH_FAILED";
-const messages = {
-  PROVIDER_DENIED: "第三方授权已取消",
-  OAUTH_STATE_INVALID: "授权状态无效或已过期，请重新发起",
-  OAUTH_IDENTITY_UNBOUND: "该第三方身份尚未绑定本地账户，请先使用密码登录并在个人资料中绑定",
-  OAUTH_EXCHANGE_FAILED: "第三方服务拒绝了授权码",
-  OAUTH_USERINFO_FAILED: "无法读取第三方账户资料",
-};
-renderAuthScreen("第三方登录未完成", messages[code] || "第三方登录失败，请重新尝试", `<p class="auth-notice mono">${escapeHtml(code)}</p>`, state.user ? '<a class="text-link" href="#/profile">返回个人资料</a>' : '<a class="text-link" href="#/overview">返回登录</a>');
-}
 async function handleLogin(event) {
 event.preventDefault();
 const form = event.currentTarget;
@@ -444,7 +415,7 @@ renderAuthScreen("注册账户", `创建 ${state.siteName} 账户`, `
     <div class="field"><label for="register-confirm">确认密码</label><input id="register-confirm" name="confirm_password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></div>
     ${turnstileField()}
     <button class="button auth-submit" type="submit">${state.emailVerificationEnabled ? "继续验证邮箱" : "创建账户"}</button><p class="form-error" id="register-error"></p>
-  </form>${oauthLoginButtons()}`, '<a class="text-link" href="#/overview">已有账户，返回登录</a><a class="text-link" href="#/home">公共首页</a>');
+  </form>`, '<a class="text-link" href="#/overview">已有账户，返回登录</a><a class="text-link" href="#/home">公共首页</a>');
 document.querySelector("#register-form").addEventListener("submit", handleRegister);
 mountTurnstile(document.querySelector("#register-form"));
 }
@@ -792,8 +763,6 @@ try {
   if (params.get("oauth") === "success") toast("OAuth 账号已添加");
   if (params.get("oauth") === "reauthorized") toast("OAuth 账号已重新授权");
   if (params.get("oauth") === "error") toast("OAuth 授权失败", true);
-  if (params.get("identity") === "bound") toast("第三方身份已绑定");
-  if (params.get("oauth_login") === "success") toast("第三方登录成功");
 } catch (error) {
   if (error.status === 401) return renderLogin("会话已过期，请重新登录");
   page.innerHTML = emptyState("载入失败", error.message, "重新载入", "reload-route");
@@ -1796,11 +1765,9 @@ await loadFeatureScript("usage");
 return window.Sub2MiniUsage.render(page);
 }
 async function renderProfile(page) {
-await loadFeatureScript("identity");
-const [result, totpResult, identityResult] = await Promise.all([api("/api/user/profile"), api("/api/user/totp/status"), api("/api/user/auth-identities")]);
+const [result, totpResult] = await Promise.all([api("/api/user/profile"), api("/api/user/totp/status")]);
 const profile = result.data;
 const totp = totpResult.data;
-const identityData = identityResult.data;
 page.innerHTML = `
   ${pageHeader("个人资料", "账户信息与登录安全")}
   <section class="profile-summary">
@@ -1848,10 +1815,6 @@ page.innerHTML = `
       <div class="settings-heading"><h2>双因素认证</h2><p>${totp.enabled ? `已启用 · ${formatDate(totp.enabled_at)}` : "当前未启用"}</p></div>
       ${totp.enabled ? `<button class="button danger" id="disable-totp">停用 TOTP</button>` : `<button class="button" id="enable-totp">启用 TOTP</button>`}
     </section>
-    <section class="settings-panel">
-      <div class="settings-heading"><h2>第三方身份</h2><p>绑定后可直接登录，标识只显示脱敏摘要。</p></div>
-      ${window.Sub2MiniIdentity.profileRows(identityData)}
-    </section>
   </div>`;
 page.querySelector("#profile-form").addEventListener("submit", saveProfile);
 page.querySelector("#change-password-form").addEventListener("submit", saveOwnPassword);
@@ -1859,7 +1822,6 @@ page.querySelector("#change-profile-email")?.addEventListener("click", () => ope
 page.querySelector("#remove-profile-email")?.addEventListener("click", () => openEmailRemoval(profile));
 page.querySelector("#enable-totp")?.addEventListener("click", openTotpSetup);
 page.querySelector("#disable-totp")?.addEventListener("click", openTotpDisable);
-window.Sub2MiniIdentity.attachProfile(page);
 }
 function openEmailChange(profile) {
 openModal(profile.email ? "更换登录邮箱" : "绑定登录邮箱", `<form id="email-change-form">
@@ -2129,10 +2091,8 @@ try {
 } catch (error) { toast(error.message, true); }
 }
 async function renderSettings(page) {
-await loadFeatureScript("identity");
-const [result, providersResult, mailResult] = await Promise.all([api("/api/admin/settings"), api("/api/admin/auth-providers"), api("/api/admin/mail-settings")]);
+const [result, mailResult] = await Promise.all([api("/api/admin/settings"), api("/api/admin/mail-settings")]);
 const settings = result.data;
-const authProviders = providersResult.data;
 const mailSettings = mailResult.data;
 page.innerHTML = `
   ${pageHeader("运行设置", "即时生效的网关参数与只读部署信息")}
@@ -2181,13 +2141,11 @@ page.innerHTML = `
         <p class="form-error" id="mail-settings-error"></p>
       </form>
     </section>
-    ${window.Sub2MiniIdentity.settingsPanel(authProviders)}
   </div>`;
 page.querySelector("#runtime-settings-form").addEventListener("submit", saveSettings);
 page.querySelector("#mail-settings-form").addEventListener("submit", saveMailSettings);
 page.querySelector("#test-smtp").addEventListener("click", testSmtpConnection);
 page.querySelector("#send-smtp-test").addEventListener("click", sendSmtpTest);
-window.Sub2MiniIdentity.attachSettings(page);
 }
 async function saveMailSettings(event) {
 event.preventDefault();

@@ -20,19 +20,13 @@ Status values:
 | `/login` | complete | `#/overview` | - |
 | `/register` | complete | `#/register` | - |
 | `/email-verify` | complete | `#/email-verify` | - |
-| `/auth/callback` | complete | `#/oauth-result` | - |
-| `/auth/linuxdo/callback` | complete | `#/oauth-result` | - |
-| `/auth/wechat/callback` | complete | `#/oauth-result` | - |
-| `/auth/dingtalk/callback` | complete | `#/oauth-result` | - |
-| `/auth/dingtalk/email-completion` | complete | `#/oauth-result` | - |
-| `/auth/oidc/callback` | complete | `/api/auth/oauth/oidc/callback` | - |
 | `/forgot-password` | complete | `#/forgot-password` | - |
 | `/reset-password` | complete | `#/reset-password` | - |
 | `/key-usage` | complete | `#/key-usage` | - |
 | `/legal/:documentId` | complete | `#/page/:slug` | - |
 
-The localhost callback on port `1455` is upstream OpenAI/Codex account OAuth. It
-does not count as migration of the original application's user login providers.
+Third-party user login providers are intentionally excluded. The localhost callback
+on port `1455` is retained only for upstream OpenAI/Codex account authorization.
 
 ## User console
 
@@ -181,23 +175,6 @@ does not count as migration of the original application's user login providers.
 - Added the dedicated `#/email-verify` registration step with retry countdown and
   session-scoped pending registration data, while retaining atomic challenge
   consumption and account creation.
-- Added configurable generic OIDC login for identities first bound from an
-  authenticated profile, with encrypted client secrets and PKCE verifiers,
-  hashed one-time state, bounded token/UserInfo parsing and strict HTTPS or
-  loopback endpoint validation.
-- Added masked identity status, binding/unbinding controls, administrator OIDC
-  settings, provider buttons and stable callback error pages as a lazy embedded
-  frontend feature while keeping the primary script below 256 KiB.
-- Added encrypted ten-minute OIDC continuation profiles with hashed one-time
-  browser tokens for identities not yet bound to a local account.
-- Added password and optional TOTP/recovery-code verification for binding an OIDC
-  identity to an existing account, plus a lazy embedded account-choice page.
-- Added OIDC account registration with provider-verified email adoption and
-  optional local email verification;
-  user creation, identity binding and one-time-token consumption are atomic.
-- Completed OIDC discovery and JWKS loading with bounded caching, key rotation,
-  RS256/PS256/ES256 signature verification, encrypted nonce state, exact issuer
-  and audience checks, clock-skew handling and optional verified-email policy.
 - Added encrypted Gemini batch-image providers with model policies, priorities,
   concurrency limits, connectivity probes and administrator controls.
 - Added persistent asynchronous batch-image jobs with per-Key model enforcement,
@@ -269,13 +246,6 @@ does not count as migration of the original application's user login providers.
   state, user controls, administrator visibility and cancellation-safe cleanup.
 - Added plan original-price, ISO display-currency, product-name and structured
   feature fields across administrator editing and user cards.
-- Generalized the encrypted external-identity flow across OIDC, GitHub, Google and
-  LinuxDo with provider-scoped state/PKCE, verified GitHub/Google email handling,
-  shared pending registration, binding controls and independent administrator presets.
-- Completed DingTalk personal and enterprise OAuth with UnionID identity mapping,
-  real internal-member verification through app-token staff lookup, safe public
-  fallback, registration bypass policy, corporate email/name/department attribute
-  synchronization and administrator/user-detail controls.
 - Added encrypted SQLite SMTP settings with Webhook/SMTP/automatic transport
   selection, STARTTLS and implicit TLS, loopback-only plaintext mode, connection
   and test-email controls, bounded sessions and unified auth/risk/ops delivery.
@@ -283,9 +253,6 @@ does not count as migration of the original application's user login providers.
   same-origin SSE live QPS/TPS and active-stream metrics, TTFT/retry/account-switch
   request details, bounded redacted runtime logs, dynamic log controls, retention,
   alert evaluation and daily/weekly/manual email reports.
-- Added separate encrypted WeChat Open and WeChat MP configurations with native
-  query-string token/UserInfo exchange, OpenID fallback, UnionID-preferred identity
-  mapping, cross-mode account reuse and shared registration/binding continuation.
 - Added channel model mapping with exact and longest-prefix wildcard rules,
   requested/mapped billing-model selection and preserved usage lineage. Cache
   writes and image input/output Token now use their configured flat or interval

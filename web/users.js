@@ -123,7 +123,7 @@
     const result = await api(`/api/admin/users/${id}`);
     const data = result.data;
     const user = data.user;
-    openModal(`用户详情 · ${user.username}`, `<div class="user-detail-summary"><div><span>余额</span><strong>${formatMoney(user.balance_cents)}</strong></div><div><span>累计请求</span><strong>${formatNumber(user.total_requests)}</strong></div><div><span>累计 Token</span><strong>${formatNumber(user.total_tokens)}</strong></div><div><span>累计成本</span><strong>${formatMicrousd(user.total_cost_microusd)}</strong></div></div><dl class="detail-list user-identity"><div><dt>显示名称</dt><dd>${escapeHtml(user.display_name)}</dd></div><div><dt>邮箱</dt><dd>${escapeHtml(user.email || "-")} ${user.email ? (user.email_verified ? status("已验证") : status("未验证", "warn")) : ""}</dd></div><div><dt>状态</dt><dd>${user.enabled ? status("正常") : status("停用", "off")}</dd></div><div><dt>备注</dt><dd>${escapeHtml(user.notes || "-")}</dd></div><div><dt>创建 / 最近请求</dt><dd>${formatDate(user.created_at)} / ${formatDate(user.last_request_at)}</dd></div></dl>${detailSection("外部身份属性", externalAttributeRows(data.external_attributes || []))}${detailSection("API Key", keyRows(data.keys))}${detailSection("订阅", subscriptionRows(data.subscriptions))}${detailSection("订单", orderRows(data.orders))}${detailSection("余额流水", balanceRows(data.balance_adjustments))}${detailSection("近 30 天使用", trendRows(data.trend))}`, `<button class="button secondary" data-close-modal>关闭</button>${user.role === "user" ? `<button class="button secondary" id="detail-adjust-balance">调整余额</button><button class="button" id="detail-edit-user">编辑用户</button>` : ""}`);
+    openModal(`用户详情 · ${user.username}`, `<div class="user-detail-summary"><div><span>余额</span><strong>${formatMoney(user.balance_cents)}</strong></div><div><span>累计请求</span><strong>${formatNumber(user.total_requests)}</strong></div><div><span>累计 Token</span><strong>${formatNumber(user.total_tokens)}</strong></div><div><span>累计成本</span><strong>${formatMicrousd(user.total_cost_microusd)}</strong></div></div><dl class="detail-list user-identity"><div><dt>显示名称</dt><dd>${escapeHtml(user.display_name)}</dd></div><div><dt>邮箱</dt><dd>${escapeHtml(user.email || "-")} ${user.email ? (user.email_verified ? status("已验证") : status("未验证", "warn")) : ""}</dd></div><div><dt>状态</dt><dd>${user.enabled ? status("正常") : status("停用", "off")}</dd></div><div><dt>备注</dt><dd>${escapeHtml(user.notes || "-")}</dd></div><div><dt>创建 / 最近请求</dt><dd>${formatDate(user.created_at)} / ${formatDate(user.last_request_at)}</dd></div></dl>${detailSection("API Key", keyRows(data.keys))}${detailSection("订阅", subscriptionRows(data.subscriptions))}${detailSection("订单", orderRows(data.orders))}${detailSection("余额流水", balanceRows(data.balance_adjustments))}${detailSection("近 30 天使用", trendRows(data.trend))}`, `<button class="button secondary" data-close-modal>关闭</button>${user.role === "user" ? `<button class="button secondary" id="detail-adjust-balance">调整余额</button><button class="button" id="detail-edit-user">编辑用户</button>` : ""}`);
     wideModal();
     modal.querySelector("#detail-adjust-balance")?.addEventListener("click", () => openBalance(user));
     modal.querySelector("#detail-edit-user")?.addEventListener("click", () => openEdit(user));
@@ -131,11 +131,6 @@
 
   function detailSection(title, body) {
     return `<section class="user-detail-section"><div class="section-title"><h2>${escapeHtml(title)}</h2></div>${body}</section>`;
-  }
-
-  function externalAttributeRows(rows) {
-    if (!rows.length) return emptyState("暂无外部属性", "企业身份同步后会显示在这里");
-    return `<div class="table-wrap"><table><thead><tr><th>来源</th><th>属性</th><th>值</th><th>更新时间</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.provider)}</td><td><span class="cell-main">${escapeHtml(row.name)}</span><span class="cell-sub mono">${escapeHtml(row.key)}</span></td><td>${escapeHtml(row.value || "-")}</td><td>${formatDate(row.updated_at)}</td></tr>`).join("")}</tbody></table></div>`;
   }
 
   function keyRows(rows) {

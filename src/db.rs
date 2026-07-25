@@ -115,7 +115,10 @@ mod tests {
              'promo_codes', 'promo_usages', 'affiliate_profiles', 'affiliate_invites', \
              'affiliate_rebates', 'affiliate_transfers', 'invitation_codes', \
              'invitation_uses', 'payment_provider_instances', 'payment_orders', \
-             'payment_events', 'payment_refunds', 'wxpay_payment_oauth_flows')",
+             'payment_events', 'payment_refunds', 'wxpay_payment_oauth_flows', \
+             'external_auth_providers', 'external_auth_identities', \
+             'external_oauth_flows', 'external_oauth_pending', \
+             'user_external_attributes')",
         )
         .fetch_one(&pool)
         .await

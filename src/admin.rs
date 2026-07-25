@@ -21,7 +21,6 @@ use crate::{
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(crate::dashboard::admin_router())
-        .merge(crate::external_auth::admin_router())
         .merge(crate::batch_images::admin_router())
         .merge(crate::account_data::admin_router())
         .merge(crate::account_tools::admin_router())

@@ -8,7 +8,6 @@ fn main() {
         ("OPS", "web/ops.js"),
         ("USAGE", "web/usage.js"),
         ("USERS", "web/users.js"),
-        ("IDENTITY", "web/identity.js"),
         ("BATCH_IMAGES", "web/batch-images.js"),
         ("CONTENT", "web/content.js"),
         ("ENGAGEMENT", "web/engagement.js"),

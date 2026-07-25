@@ -90,9 +90,6 @@ select:focus-visible, textarea:focus-visible {
 .login-form-wrap > p { margin: 0 0 28px; color: var(--muted); }
 .text-link { display: inline-block; margin-top: 20px; font-size: .84rem; }
 .login-links { display: flex; flex-wrap: wrap; gap: 16px; }
-.oauth-login { display: grid; gap: 8px; margin: 18px 0; padding-top: 16px; border-top: 1px solid var(--line); }
-.oauth-login > span { color: var(--muted); font-size: .78rem; }
-.oauth-login .button { text-align: center; text-decoration: none; }
 .auth-form-wrap { overflow-y: auto; }
 .turnstile-slot { min-height: 65px; margin: 4px 0 14px; }
 .auth-submit { width: 100%; }
@@ -531,11 +528,6 @@ select:focus-visible, textarea:focus-visible {
 .profile-summary strong { display: block; margin-top: 14px; overflow-wrap: anywhere; font-size: 1rem; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .settings-panel { padding: 22px; background: var(--surface); border: 1px solid var(--line); }
-.identity-list { display: grid; gap: 10px; }
-.identity-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.identity-row:last-child { border-bottom: 0; }
-.identity-row strong, .identity-row span { display: block; }
-.identity-row span { margin-top: 4px; color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
 .settings-heading { margin-bottom: 22px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
 .settings-heading.compact { margin-top: 24px; margin-bottom: 14px; }
 .settings-heading h2 { margin: 0; font-size: 1rem; }

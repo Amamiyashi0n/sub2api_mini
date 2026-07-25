@@ -37,11 +37,6 @@ const USAGE: Asset = Asset::new(
     "text/javascript; charset=utf-8",
     concat!("\"", env!("SUB2API_MINI_USAGE_ETAG"), "\""),
 );
-const IDENTITY: Asset = Asset::new(
-    include_bytes!("../web/identity.js"),
-    "text/javascript; charset=utf-8",
-    concat!("\"", env!("SUB2API_MINI_IDENTITY_ETAG"), "\""),
-);
 const BATCH_IMAGES: Asset = Asset::new(
     include_bytes!("../web/batch-images.js"),
     "text/javascript; charset=utf-8",
@@ -136,7 +131,6 @@ where
         .route("/users.js", get(users))
         .route("/ops.js", get(ops))
         .route("/usage.js", get(usage))
-        .route("/identity.js", get(identity))
         .route("/batch-images.js", get(batch_images))
         .route("/content.js", get(content))
         .route("/engagement.js", get(engagement))
@@ -173,10 +167,6 @@ async fn ops(headers: HeaderMap) -> Response<Body> {
 
 async fn usage(headers: HeaderMap) -> Response<Body> {
     asset_response(&headers, &USAGE)
-}
-
-async fn identity(headers: HeaderMap) -> Response<Body> {
-    asset_response(&headers, &IDENTITY)
 }
 
 async fn batch_images(headers: HeaderMap) -> Response<Body> {
@@ -428,20 +418,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
         assert!(String::from_utf8_lossy(&body).contains("Sub2MiniUsage"));
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/identity.js")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-        assert!(String::from_utf8_lossy(&body).contains("Sub2MiniIdentity"));
 
         let response = app
             .clone()

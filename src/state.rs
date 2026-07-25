@@ -30,7 +30,6 @@ pub struct AppState {
     pub oauth_refresh_locks: Arc<Mutex<HashMap<i64, Arc<Mutex<()>>>>>,
     pub model_cache: Arc<Mutex<HashMap<i64, CachedModels>>>,
     pub vertex_tokens: Arc<Mutex<HashMap<i64, CachedVertexToken>>>,
-    pub oidc_jwks: Arc<Mutex<HashMap<String, CachedOidcJwks>>>,
     pub login_attempts: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
     pub runtime_settings: Arc<RwLock<RuntimeSettings>>,
     pub started_at: Instant,
@@ -56,7 +55,6 @@ impl AppState {
             oauth_refresh_locks: Arc::new(Mutex::new(HashMap::new())),
             model_cache: Arc::new(Mutex::new(HashMap::new())),
             vertex_tokens: Arc::new(Mutex::new(HashMap::new())),
-            oidc_jwks: Arc::new(Mutex::new(HashMap::new())),
             login_attempts: Arc::new(Mutex::new(HashMap::new())),
             runtime_settings: Arc::new(RwLock::new(RuntimeSettings::default())),
             started_at: Instant::now(),
@@ -150,12 +148,6 @@ impl AppState {
         row.encrypted_proxy_url = proxy_url;
         row.decrypt(&self.crypto)
     }
-}
-
-#[derive(Clone)]
-pub struct CachedOidcJwks {
-    pub value: Value,
-    pub cached_at: Instant,
 }
 
 #[derive(Default)]

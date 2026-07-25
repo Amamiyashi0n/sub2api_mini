@@ -23,3 +23,4 @@ cargo run
 Runtime configuration is loaded directly from `/data/sub2api_mini/.env`. The UI is embedded in the Rust binary, so UI changes require a rebuild. Credentials are encrypted with `SUB2API_MINI_MASTER_KEY`; changing that key makes existing upstream credentials unreadable.
 
 The administrator creates and disables users. Each user has an isolated session, API keys, dashboard, and usage history. Upstream accounts remain administrator-managed and shared by the gateway scheduler.
+User authentication is local username/email and password only; upstream OpenAI/Codex OAuth remains available for administrator-managed gateway accounts.

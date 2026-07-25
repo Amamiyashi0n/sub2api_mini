@@ -155,15 +155,6 @@ async fn user_detail(State(state): State<AppState>, Path(id): Path<i64>) -> ApiR
     .bind(id)
     .fetch_all(&state.pool)
     .await?;
-    let external_attributes: Vec<(String, String, String, String, String)> = sqlx::query_as(
-        "SELECT provider, attribute_key, attribute_name, value, updated_at \
-         FROM user_external_attributes WHERE user_id = ? \
-         ORDER BY provider, attribute_name, attribute_key",
-    )
-    .bind(id)
-    .fetch_all(&state.pool)
-    .await?;
-
     Ok(Json(json!({"data": {
         "user": user,
         "keys": keys,
@@ -184,10 +175,6 @@ async fn user_detail(State(state): State<AppState>, Path(id): Path<i64>) -> ApiR
         })).collect::<Vec<_>>(),
         "trend": trend.into_iter().map(|row| json!({
             "date": row.0, "requests": row.1, "tokens": row.2, "cost_microusd": row.3
-        })).collect::<Vec<_>>(),
-        "external_attributes": external_attributes.into_iter().map(|row| json!({
-            "provider": row.0, "key": row.1, "name": row.2,
-            "value": row.3, "updated_at": row.4
         })).collect::<Vec<_>>()
     }})))
 }

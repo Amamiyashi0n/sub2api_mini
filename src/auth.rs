@@ -39,7 +39,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/send-verification-code", post(send_verification_code))
         .route("/forgot-password", post(forgot_password))
         .route("/reset-password", post(reset_password))
-        .merge(crate::external_auth::auth_router())
         .merge(protected)
 }
 

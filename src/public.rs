@@ -45,7 +45,6 @@ async fn public_settings(State(state): State<AppState>) -> ApiResult<Json<Value>
             .and_then(|value| value.parse::<bool>().ok())
             .unwrap_or(default)
     };
-    let oauth_providers = crate::external_auth::public_provider_summary(&state).await?;
     let home_content = value("home_content").unwrap_or("");
     let home_content_url = crate::content::safe_iframe_url(home_content);
     let home_content_html = if home_content_url.is_none() {
@@ -77,7 +76,6 @@ async fn public_settings(State(state): State<AppState>) -> ApiResult<Json<Value>
         ,"channel_monitor_enabled": flag("channel_monitor_enabled", true)
         ,"turnstile_enabled": flag("turnstile_enabled", false)
         ,"turnstile_site_key": value("turnstile_site_key").unwrap_or("")
-        ,"oauth_providers": oauth_providers
     }})))
 }
 
@@ -356,6 +354,7 @@ mod tests {
         let (_directory, state) = test_support::state().await;
         let Json(initial) = public_settings(State(state.clone())).await.unwrap();
         assert_eq!(initial["data"]["default_theme"], "light");
+        assert!(initial["data"].get("oauth_providers").is_none());
 
         sqlx::query("INSERT INTO app_settings (key, value) VALUES ('default_theme', 'dark')")
             .execute(&state.pool)

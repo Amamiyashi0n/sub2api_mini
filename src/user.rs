@@ -20,7 +20,6 @@ use crate::{
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(crate::dashboard::user_router())
-        .merge(crate::external_auth::user_router())
         .merge(crate::batch_images::user_router())
         .route("/profile", get(profile).put(update_profile))
         .route("/profile/email/request", post(request_email_change))

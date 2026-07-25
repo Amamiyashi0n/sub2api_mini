@@ -13,7 +13,6 @@ mod crypto;
 mod dashboard;
 mod db;
 mod error;
-mod external_auth;
 mod gateway;
 mod groups;
 mod key_policy;
@@ -207,22 +206,20 @@ mod tests {
     #[tokio::test]
     async fn unknown_static_path_returns_json_not_found() {
         let app = Router::<()>::new().merge(web::router()).fallback(not_found);
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/missing.txt")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        for path in ["/missing.txt", "/identity.js"] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
 
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "application/json"
-        );
-        let body = to_bytes(response.into_body(), 4096).await.unwrap();
-        assert!(String::from_utf8_lossy(&body).contains("NOT_FOUND"));
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                "application/json"
+            );
+            let body = to_bytes(response.into_body(), 4096).await.unwrap();
+            assert!(String::from_utf8_lossy(&body).contains("NOT_FOUND"));
+        }
     }
 }
