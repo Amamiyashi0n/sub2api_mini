@@ -276,7 +276,7 @@ mod tests {
     };
     use tower::ServiceExt;
 
-    use super::router;
+    use super::{APP, router};
 
     #[tokio::test]
     async fn serves_embedded_assets_with_security_headers() {
@@ -310,7 +310,9 @@ mod tests {
             .unwrap();
         assert!(csp.contains("frame-src http: https:"));
         assert!(csp.contains("img-src 'self' data: http: https:"));
-        let body = to_bytes(response.into_body(), 256 * 1024).await.unwrap();
+        let body = to_bytes(response.into_body(), APP.body.len())
+            .await
+            .unwrap();
         assert!(String::from_utf8_lossy(&body).contains("Sub2API Mini"));
     }
 

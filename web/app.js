@@ -33,7 +33,7 @@ const routes = {
 overview: { label: "概览", render: renderOverview },
 opsAdmin: { label: "运行运维", render: renderOpsAdmin, adminOnly: true },
 users: { label: "用户管理", render: renderUsers, adminOnly: true },
-accounts: { label: "上游账号", render: renderAccounts, adminOnly: true },
+accounts: { label: "账号管理", render: renderAccounts, adminOnly: true },
 proxies: { label: "网络代理", render: renderProxies, adminOnly: true },
 keys: { label: "API Key", render: renderKeys },
 batchImages: { label: "批量生图", render: renderBatchImages },
@@ -97,9 +97,21 @@ chevron: '<path d="m9 18 6-6-6-6"/>',
 chevronDown: '<path d="m6 9 6 6 6-6"/>',
 panelClose: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M16 9l-3 3 3 3"/>',
 panelOpen: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M14 9l3 3-3 3"/>',
-sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.42"/>',
-moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
-logout: '<path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.42"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  refresh: '<path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  upload: '<path d="M12 3v12M7 8l5-5 5 5M5 21h14"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  play: '<path d="m8 5 11 7-11 7Z"/>',
+  copy: '<rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/>',
+  logout: '<path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
 };
 const adminNavigation = [
 { key: "overview" },
@@ -146,6 +158,14 @@ let currentKeyOwners = [];
 let selectedKeyIds = new Set();
 let currentAccounts = [];
 let selectedAccountIds = new Set();
+let accountFilters = { search: "", kind: "", status: "", group: "" };
+const accountAutoRefreshOptions = [5, 10, 15, 30];
+const storedAccountAutoRefresh = Number(localStorage.getItem("mini_account_auto_refresh") || 0);
+let accountAutoRefreshSeconds = accountAutoRefreshOptions.includes(storedAccountAutoRefresh) ? storedAccountAutoRefresh : 0;
+let accountAutoRefreshTimer = null;
+let accountAutoRefreshDeadline = 0;
+let activeUpstreamAccountMenu = null;
+let activeUpstreamAccountMenuTrigger = null;
 let currentProxies = [];
 let currentMonitors = [];
 let currentChannels = [];
@@ -173,6 +193,14 @@ let selectedPromptEventIds = new Set();
 const featureScripts = new Map();
 document.addEventListener("DOMContentLoaded", init);
 window.addEventListener("hashchange", navigate);
+document.addEventListener("click", event => {
+  const tools = document.querySelector("#account-tools-dropdown");
+  if (tools && !tools.contains(event.target)) closeAccountToolsMenu();
+  if (!activeUpstreamAccountMenu) return;
+  if (activeUpstreamAccountMenu.contains(event.target) || event.target.closest("[data-account-menu]")) return;
+  closeUpstreamAccountMenu();
+});
+document.addEventListener("keydown", event => { if (event.key === "Escape") closeUpstreamAccountMenu(); });
 function loadFeatureScript(name) {
 if (featureScripts.has(name)) return featureScripts.get(name);
 const promise = new Promise((resolve, reject) => {
@@ -732,6 +760,8 @@ const [routeName, query = ""] = hash.split("?");
 const allowed = new Map(activeRoutes());
 const route = allowed.get(routeName) || routes.overview;
 const activeRouteName = allowed.has(routeName) ? routeName : "overview";
+closeUpstreamAccountMenu();
+stopAccountAutoRefresh();
 document.querySelectorAll("[data-route]").forEach(link => {
   const active = link.dataset.route === activeRouteName;
   link.classList.toggle("active", active);
@@ -809,67 +839,231 @@ const [result, proxies, groups] = await Promise.all([
 currentAccounts = result.data;
 currentProxies = proxies.data;
 currentGroups = groups.data;
-selectedAccountIds = new Set();
+selectedAccountIds = new Set([...selectedAccountIds].filter(id => currentAccounts.some(account => account.id === id)));
 page.innerHTML = `
-  ${pageHeader("上游账号", `${result.data.length} 个账号`, `
-    <button class="button secondary" id="oauth-start">OAuth 授权</button>
-    <button class="button secondary" id="import-accounts">导入备份</button>
-    <button class="button secondary" id="export-accounts">导出备份</button>
-    <button class="button" id="add-account">添加账号</button>`)}
-  ${result.data.length ? `<div class="account-batch-bar"><span id="account-selection-count">未选择账号</span><select id="account-batch-action" aria-label="账号批量操作"><option value="edit">批量编辑</option><option value="enable">启用调度</option><option value="disable">停用调度</option><option value="recover">恢复运行状态</option><option value="refresh">刷新 OAuth Token</option><option value="delete">删除账号</option></select><button class="button secondary" id="apply-account-batch" disabled>应用</button></div>${accountTable(result.data)}` : emptyState("暂无上游账号", "添加 API Key 或 OAuth 账号后即可转发请求", "添加账号", "empty-add-account")}`;
-document.querySelector("#add-account")?.addEventListener("click", () => openAccountModal());
-document.querySelector("#empty-add-account")?.addEventListener("click", () => openAccountModal());
-document.querySelector("#oauth-start")?.addEventListener("click", startOAuth);
-document.querySelector("#import-accounts")?.addEventListener("click", openAccountImportModal);
-document.querySelector("#export-accounts")?.addEventListener("click", exportAccounts);
-page.querySelector("#apply-account-batch")?.addEventListener("click", applyAccountBatch);
-page.querySelectorAll("[data-account-action]").forEach(button => button.addEventListener("click", handleAccountAction));
-window.Sub2MiniAccountTools.attach(page);
-window.Sub2MiniAccountSchedules.attach(page);
-page.querySelectorAll("[data-account-select]").forEach(input => input.addEventListener("change", event => {
+  ${pageHeader("账号管理", `${result.data.length} 个账号 · OpenAI 上游连接与调度`)}
+  <section class="account-page-toolbar" aria-label="账号筛选与操作">
+    <div class="account-filters">
+      <label class="account-search">${appIcon("search")}<input id="account-search" type="search" value="${escapeHtml(accountFilters.search)}" placeholder="搜索账号..." aria-label="搜索账号"></label>
+      <select id="account-kind-filter" aria-label="账号类型"><option value="">全部类型</option><option value="oauth" ${accountFilters.kind === "oauth" ? "selected" : ""}>OAuth</option><option value="api_key" ${accountFilters.kind === "api_key" ? "selected" : ""}>API Key</option></select>
+      <select id="account-status-filter" aria-label="账号状态"><option value="">全部状态</option><option value="active" ${accountFilters.status === "active" ? "selected" : ""}>正常</option><option value="inactive" ${accountFilters.status === "inactive" ? "selected" : ""}>停用</option><option value="cooldown" ${accountFilters.status === "cooldown" ? "selected" : ""}>冷却中</option><option value="error" ${accountFilters.status === "error" ? "selected" : ""}>错误</option></select>
+      <select id="account-group-filter" aria-label="路由分组"><option value="">全部分组</option><option value="ungrouped" ${accountFilters.group === "ungrouped" ? "selected" : ""}>未分组</option>${currentGroups.map(group => `<option value="${group.id}" ${String(accountFilters.group) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select>
+    </div>
+    <div class="account-toolbar-actions">
+      <button class="button secondary icon-only" id="refresh-accounts" type="button" title="刷新账号" aria-label="刷新账号">${appIcon("refresh")}</button>
+      <label class="account-auto-refresh"><select id="account-auto-refresh" aria-label="自动刷新周期"><option value="0">自动刷新：关闭</option>${accountAutoRefreshOptions.map(seconds => `<option value="${seconds}" ${seconds === accountAutoRefreshSeconds ? "selected" : ""}>自动刷新：${seconds} 秒</option>`).join("")}</select><span id="account-refresh-countdown">${accountAutoRefreshSeconds ? `${accountAutoRefreshSeconds} 秒后刷新` : ""}</span></label>
+      <div class="account-tools-dropdown" id="account-tools-dropdown"><button class="button secondary" id="account-tools-toggle" type="button" aria-expanded="false">${appIcon("more")}<span>更多操作</span>${appIcon("chevronDown", "account-tools-chevron")}</button><div class="account-tools-menu" id="account-tools-menu" hidden>
+        <button id="oauth-start" type="button">${appIcon("link")}<span><strong>OAuth 授权</strong><small>浏览器 PKCE 添加账号</small></span></button>
+        <button id="import-accounts" type="button">${appIcon("upload")}<span><strong>导入账号</strong><small>导入 Sub2API JSON 备份</small></span></button>
+        <button id="export-accounts" type="button">${appIcon("download")}<span><strong>导出账号</strong><small>导出加密凭证的敏感备份</small></span></button>
+      </div></div>
+      <button class="button" id="add-account" type="button">${appIcon("plus")}<span>添加账号</span></button>
+    </div>
+  </section>
+  <div id="account-collection"></div>`;
+page.querySelector("#add-account").addEventListener("click", () => openAccountModal());
+page.querySelector("#oauth-start").addEventListener("click", startOAuth);
+page.querySelector("#import-accounts").addEventListener("click", openAccountImportModal);
+page.querySelector("#export-accounts").addEventListener("click", exportAccounts);
+page.querySelector("#refresh-accounts").addEventListener("click", renderRoute);
+page.querySelector("#account-tools-toggle").addEventListener("click", () => {
+  const menu = page.querySelector("#account-tools-menu");
+  menu.hidden = !menu.hidden;
+  page.querySelector("#account-tools-toggle").setAttribute("aria-expanded", String(!menu.hidden));
+});
+page.querySelector("#account-search").addEventListener("input", event => { accountFilters.search = event.currentTarget.value; renderAccountCollection(page); });
+page.querySelector("#account-kind-filter").addEventListener("change", event => { accountFilters.kind = event.currentTarget.value; renderAccountCollection(page); });
+page.querySelector("#account-status-filter").addEventListener("change", event => { accountFilters.status = event.currentTarget.value; renderAccountCollection(page); });
+page.querySelector("#account-group-filter").addEventListener("change", event => { accountFilters.group = event.currentTarget.value; renderAccountCollection(page); });
+page.querySelector("#account-auto-refresh").addEventListener("change", event => {
+  accountAutoRefreshSeconds = Number(event.currentTarget.value) || 0;
+  if (accountAutoRefreshSeconds) localStorage.setItem("mini_account_auto_refresh", String(accountAutoRefreshSeconds)); else localStorage.removeItem("mini_account_auto_refresh");
+  scheduleAccountAutoRefresh(page);
+});
+page.querySelectorAll("#account-tools-menu button").forEach(button => button.addEventListener("click", closeAccountToolsMenu));
+renderAccountCollection(page);
+scheduleAccountAutoRefresh(page);
+}
+function renderAccountCollection(page) {
+closeUpstreamAccountMenu();
+const accounts = filteredAccounts();
+const target = page.querySelector("#account-collection");
+const hasFilters = Object.values(accountFilters).some(Boolean);
+const subtitle = accounts.length === currentAccounts.length ? `${currentAccounts.length} 个账号 · OpenAI 上游连接与调度` : `显示 ${accounts.length} / ${currentAccounts.length} 个账号`;
+page.querySelector(".page-header p").textContent = subtitle;
+const topbarDescription = document.querySelector("#topbar-description");
+if (topbarDescription && currentRouteName() === "accounts") { topbarDescription.textContent = subtitle; topbarDescription.hidden = false; }
+target.innerHTML = `${currentAccounts.length ? accountBulkBar() : ""}${accounts.length ? accountTable(accounts) : emptyState(currentAccounts.length ? "没有匹配账号" : "暂无账号", currentAccounts.length ? "调整筛选条件后重试" : "添加 API Key 或 OAuth 账号后即可转发请求", currentAccounts.length ? (hasFilters ? "清除筛选" : "") : "添加账号", currentAccounts.length ? "reset-account-filters" : "empty-add-account")}<div id="account-menu-host">${accounts.map(accountActionMenu).join("")}</div>`;
+target.querySelector("#empty-add-account")?.addEventListener("click", () => openAccountModal());
+target.querySelector("#reset-account-filters")?.addEventListener("click", () => {
+  accountFilters = { search: "", kind: "", status: "", group: "" };
+  page.querySelector("#account-search").value = "";
+  page.querySelector("#account-kind-filter").value = "";
+  page.querySelector("#account-status-filter").value = "";
+  page.querySelector("#account-group-filter").value = "";
+  renderAccountCollection(page);
+});
+target.querySelectorAll("[data-account-action]").forEach(button => button.addEventListener("click", handleAccountAction));
+target.querySelectorAll("[data-account-menu]").forEach(button => button.addEventListener("click", openUpstreamAccountMenu));
+target.querySelectorAll("[data-account-batch]").forEach(button => button.addEventListener("click", applyAccountBatch));
+window.Sub2MiniAccountTools.attach(target);
+window.Sub2MiniAccountSchedules.attach(target);
+target.querySelectorAll("[data-account-select]").forEach(input => input.addEventListener("change", event => {
   const id = Number(event.currentTarget.value);
   event.currentTarget.checked ? selectedAccountIds.add(id) : selectedAccountIds.delete(id);
-  updateAccountBatchState(page);
+  updateAccountBatchState(page, accounts);
 }));
-page.querySelector("#account-select-all")?.addEventListener("change", event => {
-  currentAccounts.forEach(account => event.currentTarget.checked ? selectedAccountIds.add(account.id) : selectedAccountIds.delete(account.id));
-  page.querySelectorAll("[data-account-select]").forEach(input => { input.checked = event.currentTarget.checked; });
-  updateAccountBatchState(page);
+target.querySelector("#account-select-all")?.addEventListener("change", event => {
+  accounts.forEach(account => event.currentTarget.checked ? selectedAccountIds.add(account.id) : selectedAccountIds.delete(account.id));
+  target.querySelectorAll("[data-account-select]").forEach(input => { input.checked = event.currentTarget.checked; });
+  updateAccountBatchState(page, accounts);
+});
+updateAccountBatchState(page, accounts);
+}
+function filteredAccounts() {
+const query = accountFilters.search.trim().toLowerCase();
+return currentAccounts.filter(account => {
+  const groups = accountGroups(account.id);
+  const stateName = accountState(account);
+  if (query && ![account.id, account.name, account.base_url, account.proxy_name].some(value => String(value || "").toLowerCase().includes(query))) return false;
+  if (accountFilters.kind && account.kind !== accountFilters.kind) return false;
+  if (accountFilters.status && stateName !== accountFilters.status) return false;
+  if (accountFilters.group === "ungrouped" && groups.length) return false;
+  if (accountFilters.group && accountFilters.group !== "ungrouped" && !groups.some(group => String(group.id) === String(accountFilters.group))) return false;
+  return true;
 });
 }
+function accountGroups(accountId) {
+return currentGroups.filter(group => (group.account_ids || []).some(id => Number(id) === Number(accountId)));
+}
+function accountState(account) {
+if (!account.enabled) return "inactive";
+if (account.cooldown_until) return "cooldown";
+if (account.last_error) return "error";
+return "active";
+}
+function accountStatus(account) {
+const value = accountState(account);
+if (value === "inactive") return status("停用", "off");
+if (value === "cooldown") return `${status("冷却中", "warn")}<span class="cell-sub">至 ${formatDate(account.cooldown_until)}</span>`;
+if (value === "error") return `${status("错误", "error")}<span class="cell-sub" title="${escapeHtml(account.last_error)}">${escapeHtml(account.last_error)}</span>`;
+return status("正常");
+}
+function accountBulkBar() {
+return `<section class="account-bulk-bar" aria-label="批量账号操作"><div><strong id="account-selection-count">未选择账号</strong><button class="account-selection-link" id="clear-account-selection" type="button" hidden>清除选择</button></div><div class="account-bulk-actions"><button class="button secondary small" data-account-batch="recover" disabled>重置状态</button><button class="button secondary small" data-account-batch="refresh" disabled>刷新令牌</button><button class="button secondary small" data-account-batch="enable" disabled>启用调度</button><button class="button secondary small" data-account-batch="disable" disabled>停止调度</button><button class="button small" data-account-batch="edit" disabled>批量编辑</button><button class="button danger small" data-account-batch="delete" disabled>批量删除</button></div></section>`;
+}
 function accountTable(accounts) {
-return `<div class="table-wrap"><table>
-  <thead><tr><th><input type="checkbox" id="account-select-all" aria-label="选择全部账号"></th><th>账号</th><th>类型</th><th>状态</th><th>代理</th><th>优先级</th><th class="hide-mobile">并发</th><th class="hide-mobile">最后使用</th><th></th></tr></thead>
+return `<div class="table-wrap account-table-wrap"><table class="account-table">
+  <thead><tr><th><input type="checkbox" id="account-select-all" aria-label="选择当前账号"></th><th>账号</th><th>ID</th><th>平台 / 类型</th><th>状态</th><th>调度</th><th>分组</th><th>代理</th><th>优先级 / 并发</th><th>最近使用</th><th>操作</th></tr></thead>
   <tbody>${accounts.map(account => `<tr>
-    <td><input type="checkbox" data-account-select value="${account.id}" aria-label="选择 ${escapeHtml(account.name)}"></td><td><span class="cell-main">${escapeHtml(account.name)}</span><span class="cell-sub">${escapeHtml(account.base_url)}</span></td>
-    <td>${account.kind === "oauth" ? "OAuth" : "API Key"}</td>
-    <td>${account.cooldown_until ? status("冷却中", "warn") : account.enabled ? status("可用") : status("停用", "off")}${account.last_error ? `<span class="cell-sub">${escapeHtml(account.last_error)}</span>` : ""}</td>
-    <td>${account.proxy_name ? `${account.proxy_active ? status(account.proxy_name) : status(account.proxy_name, "warn")}` : `<span class="cell-sub">直连</span>`}</td>
-    <td>${account.priority}</td><td class="hide-mobile">${account.concurrency}</td>
-    <td class="hide-mobile">${formatDate(account.last_used_at)}</td>
-    <td><div class="cell-actions">
-      <button class="button quiet small" data-account-action="test" data-id="${account.id}">测试</button>
-      <button class="button quiet small" data-account-tool="stats" data-id="${account.id}">统计</button>
-      <button class="button quiet small" data-account-tool="duplicate" data-id="${account.id}">复制</button>
-      ${account.kind === "oauth" ? `<button class="button quiet small" data-account-action="refresh" data-id="${account.id}">刷新</button>` : ""}
-      ${account.kind === "oauth" ? `<button class="button quiet small" data-account-tool="reauth" data-id="${account.id}">重认证</button>` : ""}
-      <button class="button quiet small" data-account-action="edit" data-id="${account.id}">编辑</button>
-      ${account.cooldown_until || account.last_error ? `<button class="button quiet small" data-account-action="recover" data-id="${account.id}">恢复</button>` : ""}
-      <button class="button quiet small" data-account-action="toggle" data-id="${account.id}" data-enabled="${account.enabled}">${account.enabled ? "停用" : "启用"}</button>
-      <button class="button quiet small" data-account-action="delete" data-id="${account.id}">删除</button>
-    </div></td>
+    <td><input type="checkbox" data-account-select value="${account.id}" aria-label="选择 ${escapeHtml(account.name)}" ${selectedAccountIds.has(account.id) ? "checked" : ""}></td>
+    <td><span class="cell-main">${escapeHtml(account.name)}</span><span class="cell-sub account-base-url" title="${escapeHtml(account.base_url)}">${escapeHtml(account.base_url)}</span>${account.parent_account_id ? `<span class="cell-sub">继承账号 #${account.parent_account_id}</span>` : ""}</td>
+    <td><span class="mono cell-sub">#${account.id}</span></td>
+    <td><div class="account-type-stack"><span class="account-platform-badge">OpenAI</span><span>${account.kind === "oauth" ? `OAuth${account.parent_account_id ? " · Spark" : ""}` : "API Key"}</span></div></td>
+    <td>${accountStatus(account)}</td>
+    <td><button class="account-schedule-switch ${account.enabled ? "on" : ""}" data-account-action="toggle" data-id="${account.id}" data-enabled="${account.enabled}" type="button" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停止调度" : "启用调度"}"><span></span></button></td>
+    <td>${accountGroupBadges(account.id)}</td>
+    <td>${account.proxy_name ? `<span class="cell-main">${escapeHtml(account.proxy_name)}</span><span class="cell-sub">${account.proxy_active ? "可用" : "不可用"}</span>` : `<span class="cell-sub">直连</span>`}</td>
+    <td><span class="cell-main">${account.priority}</span><span class="cell-sub">并发 ${account.concurrency}</span></td>
+    <td><span class="cell-sub">${formatDate(account.last_used_at)}</span></td>
+    <td><div class="account-primary-actions"><button class="account-icon-action" data-account-action="edit" data-id="${account.id}" type="button">${appIcon("edit")}<span>编辑</span></button><button class="account-icon-action danger" data-account-action="delete" data-id="${account.id}" type="button">${appIcon("trash")}<span>删除</span></button><button class="account-icon-action" data-account-menu="${account.id}" type="button" aria-haspopup="menu" aria-expanded="false">${appIcon("more")}<span>更多</span></button></div></td>
   </tr>`).join("")}</tbody></table></div>`;
 }
-function updateAccountBatchState(page) {
+function accountGroupBadges(accountId) {
+const groups = accountGroups(accountId);
+if (!groups.length) return `<span class="cell-sub">未分组</span>`;
+return `<div class="account-group-list">${groups.slice(0, 3).map(group => `<span title="${escapeHtml(group.name)}">${escapeHtml(group.name)}</span>`).join("")}${groups.length > 3 ? `<span>+${groups.length - 3}</span>` : ""}</div>`;
+}
+function accountActionMenu(account) {
+const inherited = Boolean(account.parent_account_id);
+const hasShadow = currentAccounts.some(item => Number(item.parent_account_id) === Number(account.id));
+return `<div class="account-action-popover" data-account-action-menu="${account.id}" role="menu" hidden>
+  <button data-account-action="test" data-id="${account.id}" type="button">${appIcon("play")}<span>测试连接</span></button>
+  <button data-account-tool="stats" data-id="${account.id}" type="button">${appIcon("chart")}<span>查看统计</span></button>
+  <button data-account-schedules="${account.id}" type="button">${appIcon("clock")}<span>定时测试</span></button>
+  ${account.kind === "api_key" && !inherited ? `<button data-account-tool="duplicate" data-id="${account.id}" type="button">${appIcon("copy")}<span>复制账号</span></button>` : ""}
+  ${account.kind === "oauth" && !inherited ? `<button data-account-tool="reauth" data-id="${account.id}" type="button">${appIcon("link")}<span>重新授权</span></button><button data-account-action="refresh" data-id="${account.id}" type="button">${appIcon("refresh")}<span>刷新令牌</span></button>` : ""}
+  ${account.kind === "oauth" && !inherited && !hasShadow ? `<button data-account-tool="spark" data-id="${account.id}" type="button">${appIcon("copy")}<span>创建 Spark 影子</span></button>` : ""}
+  ${account.cooldown_until || account.last_error ? `<div class="account-menu-divider"></div><button data-account-action="recover" data-id="${account.id}" type="button">${appIcon("refresh")}<span>恢复状态</span></button>` : ""}
+</div>`;
+}
+function openUpstreamAccountMenu(event) {
+const button = event.currentTarget;
+const menu = document.querySelector(`[data-account-action-menu="${button.dataset.accountMenu}"]`);
+if (!menu) return;
+if (activeUpstreamAccountMenu === menu) { closeUpstreamAccountMenu(); return; }
+closeUpstreamAccountMenu();
+activeUpstreamAccountMenu = menu;
+activeUpstreamAccountMenuTrigger = button;
+document.body.append(menu);
+menu.hidden = false;
+button.setAttribute("aria-expanded", "true");
+const rect = button.getBoundingClientRect();
+const width = menu.offsetWidth;
+const height = menu.offsetHeight;
+const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+const top = rect.bottom + height + 8 <= window.innerHeight ? rect.bottom + 6 : Math.max(8, rect.top - height - 6);
+menu.style.left = `${left}px`;
+menu.style.top = `${top}px`;
+}
+function closeUpstreamAccountMenu() {
+if (!activeUpstreamAccountMenu) return;
+activeUpstreamAccountMenu.hidden = true;
+activeUpstreamAccountMenu.removeAttribute("style");
+activeUpstreamAccountMenuTrigger?.setAttribute("aria-expanded", "false");
+const host = document.querySelector("#account-menu-host");
+if (host) host.append(activeUpstreamAccountMenu); else activeUpstreamAccountMenu.remove();
+activeUpstreamAccountMenu = null;
+activeUpstreamAccountMenuTrigger = null;
+}
+function closeAccountToolsMenu() {
+const menu = document.querySelector("#account-tools-menu");
+const toggle = document.querySelector("#account-tools-toggle");
+if (menu) menu.hidden = true;
+toggle?.setAttribute("aria-expanded", "false");
+}
+function scheduleAccountAutoRefresh(page) {
+stopAccountAutoRefresh();
+const countdown = page.querySelector("#account-refresh-countdown");
+if (!accountAutoRefreshSeconds) {
+  if (countdown) countdown.textContent = "";
+  return;
+}
+accountAutoRefreshDeadline = Date.now() + accountAutoRefreshSeconds * 1000;
+const tick = () => {
+  const remaining = Math.max(0, Math.ceil((accountAutoRefreshDeadline - Date.now()) / 1000));
+  if (countdown?.isConnected) countdown.textContent = `${remaining} 秒后刷新`;
+  if (remaining === 0) {
+    stopAccountAutoRefresh();
+    if (currentRouteName() === "accounts") renderRoute();
+  }
+};
+tick();
+accountAutoRefreshTimer = window.setInterval(tick, 1000);
+}
+function stopAccountAutoRefresh() {
+if (accountAutoRefreshTimer != null) window.clearInterval(accountAutoRefreshTimer);
+accountAutoRefreshTimer = null;
+accountAutoRefreshDeadline = 0;
+}
+function updateAccountBatchState(page, accounts = filteredAccounts()) {
 const count = page.querySelector("#account-selection-count");
-const button = page.querySelector("#apply-account-batch");
+const visibleSelected = accounts.filter(account => selectedAccountIds.has(account.id));
 if (count) count.textContent = selectedAccountIds.size ? `已选择 ${selectedAccountIds.size} 个账号` : "未选择账号";
-if (button) button.disabled = selectedAccountIds.size === 0;
+page.querySelectorAll("[data-account-batch]").forEach(button => { button.disabled = selectedAccountIds.size === 0; });
+const clear = page.querySelector("#clear-account-selection");
+if (clear) {
+  clear.hidden = selectedAccountIds.size === 0;
+  clear.onclick = () => { selectedAccountIds.clear(); renderAccountCollection(page); };
+}
 const all = page.querySelector("#account-select-all");
-if (all) all.checked = currentAccounts.length > 0 && currentAccounts.every(account => selectedAccountIds.has(account.id));
+if (all) {
+  all.checked = accounts.length > 0 && visibleSelected.length === accounts.length;
+  all.indeterminate = visibleSelected.length > 0 && visibleSelected.length < accounts.length;
+}
 }
 async function applyAccountBatch(event) {
-const action = document.querySelector("#account-batch-action")?.value;
+const action = event.currentTarget.dataset.accountBatch;
 const ids = [...selectedAccountIds];
 if (!ids.length) return;
 if (action === "edit") return openAccountBulkEditModal(ids);
@@ -976,12 +1170,13 @@ async function handleAccountAction(event) {
 const button = event.currentTarget;
 const id = button.dataset.id;
 const action = button.dataset.accountAction;
+const account = currentAccounts.find(item => String(item.id) === String(id));
+closeUpstreamAccountMenu();
 if (action === "edit") {
-  const account = currentAccounts.find(item => String(item.id) === String(id));
   if (account) openAccountEditModal(account);
   return;
 }
-if (action === "delete" && !confirm("确认删除这个上游账号？")) return;
+if (action === "delete" && !confirm(`确认删除账号“${account?.name || id}”？使用日志会保留。`)) return;
 button.disabled = true;
 try {
   if (action === "test") {
@@ -999,12 +1194,12 @@ try {
 finally { button.disabled = false; }
 }
 function openAccountEditModal(account) {
+const inherited = Boolean(account.parent_account_id);
 openModal("编辑上游账号", `<form id="account-edit-form">
   <div class="field"><label for="edit-account-name">名称</label><input id="edit-account-name" name="name" value="${escapeHtml(account.name)}" required autofocus></div>
-  <div class="field"><label for="edit-base-url">Base URL</label><input id="edit-base-url" name="base_url" value="${escapeHtml(account.base_url)}" required></div>
-  ${account.kind === "api_key" ? `<div class="field"><label for="edit-upstream-key">替换上游 API Key</label><input id="edit-upstream-key" name="api_key" type="password" autocomplete="off"><span class="field-hint">留空保留当前密钥</span></div>` : ""}
+  ${inherited ? `<div class="sensitive-notice"><strong>Spark 影子账号</strong><span>凭证、Base URL 和代理继承自母账号 #${account.parent_account_id}，此处只调整名称与调度参数。</span></div>` : `<div class="field"><label for="edit-base-url">Base URL</label><input id="edit-base-url" name="base_url" value="${escapeHtml(account.base_url)}" required></div>${account.kind === "api_key" ? `<div class="field"><label for="edit-upstream-key">替换上游 API Key</label><input id="edit-upstream-key" name="api_key" type="password" autocomplete="off"><span class="field-hint">留空保留当前密钥</span></div>` : ""}`}
   <div class="form-grid"><div class="field"><label for="edit-priority">优先级</label><input id="edit-priority" name="priority" type="number" min="0" value="${account.priority}" required></div><div class="field"><label for="edit-concurrency">并发上限</label><input id="edit-concurrency" name="concurrency" type="number" min="1" max="1000" value="${account.concurrency}" required></div></div>
-  <div class="field"><label for="edit-account-proxy">网络代理</label><select id="edit-account-proxy" name="proxy_id">${proxyOptions(account.proxy_id)}</select><span class="field-hint">选择直连可解除代理绑定</span></div>
+  ${inherited ? "" : `<div class="field"><label for="edit-account-proxy">网络代理</label><select id="edit-account-proxy" name="proxy_id">${proxyOptions(account.proxy_id)}</select><span class="field-hint">选择直连可解除代理绑定</span></div>`}
   <p class="form-error" id="account-edit-error"></p></form>`, `<button class="button secondary" data-close-modal>取消</button><button class="button" id="save-account-edit">保存</button>`);
 modal.querySelector("#save-account-edit").addEventListener("click", () => saveAccountEdit(account.id));
 }
@@ -1014,7 +1209,7 @@ if (!form.reportValidity()) return;
 const values = Object.fromEntries(new FormData(form));
 values.priority = Number(values.priority);
 values.concurrency = Number(values.concurrency);
-values.proxy_id = values.proxy_id ? Number(values.proxy_id) : null;
+if ("proxy_id" in values) values.proxy_id = values.proxy_id ? Number(values.proxy_id) : null;
 if (!values.api_key) delete values.api_key;
 const button = modal.querySelector("#save-account-edit");
 button.disabled = true;

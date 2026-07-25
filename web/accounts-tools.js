@@ -2,28 +2,6 @@
 
 window.Sub2MiniAccountTools = (() => {
   function attach(page) {
-    currentAccounts.forEach(account => {
-      const selector = `[data-account-select][value="${account.id}"]`;
-      const row = page.querySelector(selector)?.closest("tr");
-      if (!row) return;
-      if (account.parent_account_id) {
-        row.querySelectorAll('[data-account-tool="duplicate"], [data-account-tool="reauth"], [data-account-action="refresh"], [data-account-action="edit"]').forEach(button => button.remove());
-        const typeCell = row.querySelectorAll("td")[2];
-        if (typeCell) typeCell.textContent = "OAuth · Spark";
-        const accountCell = row.querySelector(".cell-main")?.parentElement;
-        if (accountCell) accountCell.insertAdjacentHTML("beforeend", `<span class="cell-sub">继承账号 #${account.parent_account_id}</span>`);
-      } else if (account.kind === "oauth" && !currentAccounts.some(item => item.parent_account_id === account.id)) {
-        const anchor = row.querySelector('[data-account-tool="duplicate"]');
-        if (anchor) {
-          const button = document.createElement("button");
-          button.className = "button quiet small";
-          button.dataset.accountTool = "spark";
-          button.dataset.id = account.id;
-          button.textContent = "Spark 影子";
-          anchor.after(button);
-        }
-      }
-    });
     page.querySelectorAll("[data-account-tool]").forEach(button => button.addEventListener("click", handle));
   }
 
@@ -31,6 +9,7 @@ window.Sub2MiniAccountTools = (() => {
     const button = event.currentTarget;
     const account = currentAccounts.find(item => String(item.id) === button.dataset.id);
     if (!account) return;
+    closeUpstreamAccountMenu();
     const action = button.dataset.accountTool;
     if (action === "reauth") return openReauth(account);
     if (action === "spark") return openSparkConfirm(account);

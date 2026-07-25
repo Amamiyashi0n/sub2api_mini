@@ -8,16 +8,12 @@ window.Sub2MiniAccountSchedules = (() => {
   const results = new Map();
 
   function attach(page) {
-    currentAccounts.forEach(account => {
-      const anchor = page.querySelector(`[data-account-tool="duplicate"][data-id="${account.id}"]`) || page.querySelector(`[data-account-tool="stats"][data-id="${account.id}"]`);
-      if (!anchor || page.querySelector(`[data-account-schedules="${account.id}"]`)) return;
-      const button = document.createElement("button");
-      button.className = "button quiet small";
-      button.dataset.accountSchedules = account.id;
-      button.textContent = "定时";
-      button.addEventListener("click", () => open(account));
-      anchor.after(button);
-    });
+    page.querySelectorAll("[data-account-schedules]").forEach(button => button.addEventListener("click", () => {
+      const account = currentAccounts.find(item => String(item.id) === button.dataset.accountSchedules);
+      if (!account) return;
+      closeUpstreamAccountMenu();
+      open(account);
+    }));
   }
 
   async function open(account) {
