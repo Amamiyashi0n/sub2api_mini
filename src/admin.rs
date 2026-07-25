@@ -71,7 +71,8 @@ async fn settings(State(state): State<AppState>) -> ApiResult<Json<Value>> {
           'home_content', 'audit_retention_days', 'registration_enabled', \
           'email_verification_enabled', 'password_reset_enabled', \
           'channel_monitor_enabled', 'channel_monitor_default_interval_seconds', \
-          'turnstile_enabled', 'turnstile_site_key', 'turnstile_secret_key_encrypted')",
+          'turnstile_enabled', 'turnstile_site_key', 'turnstile_secret_key_encrypted', \
+          'default_theme')",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -108,6 +109,7 @@ async fn settings(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         "contact_info": setting_string("contact_info", ""),
         "doc_url": setting_string("doc_url", ""),
         "home_content": setting_string("home_content", ""),
+        "default_theme": crate::public::normalize_theme(values.iter().find(|row| row.0 == "default_theme").map(|row| row.1.as_str())),
         "audit_retention_days": audit_retention_days,
         "retry_attempts": runtime.retry_attempts,
         "model_cache_seconds": runtime.model_cache_seconds,
@@ -132,6 +134,8 @@ async fn settings(State(state): State<AppState>) -> ApiResult<Json<Value>> {
 #[derive(Deserialize)]
 struct SettingsInput {
     site_name: String,
+    #[serde(default = "default_theme")]
+    default_theme: String,
     #[serde(default)]
     site_subtitle: String,
     #[serde(default)]
@@ -173,6 +177,10 @@ fn default_monitor_interval() -> i64 {
     300
 }
 
+fn default_theme() -> String {
+    "light".into()
+}
+
 async fn update_settings(
     State(state): State<AppState>,
     Json(input): Json<SettingsInput>,
@@ -185,6 +193,7 @@ async fn update_settings(
         || !valid_site_logo(&input.site_logo)
         || !valid_optional_http_url(&input.doc_url)
         || !(1..=3650).contains(&input.audit_retention_days)
+        || !matches!(input.default_theme.trim(), "light" | "dark")
     {
         return Err(ApiError::bad_request(
             "INVALID_SETTINGS",
@@ -232,6 +241,7 @@ async fn update_settings(
     }
     let values = [
         ("site_name", input.site_name.trim().to_string()),
+        ("default_theme", input.default_theme.trim().to_string()),
         ("site_subtitle", input.site_subtitle.trim().to_string()),
         ("site_logo", input.site_logo.trim().to_string()),
         ("contact_info", input.contact_info.trim().to_string()),

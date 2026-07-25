@@ -30,7 +30,7 @@ async fn public_settings(State(state): State<AppState>) -> ApiResult<Json<Value>
           'home_content', 'registration_enabled', 'email_verification_enabled', \
           'password_reset_enabled', \
           'channel_monitor_enabled', 'turnstile_enabled', \
-          'turnstile_site_key')",
+          'turnstile_site_key', 'default_theme')",
     )
     .fetch_all(&state.pool)
     .await?;
@@ -68,6 +68,7 @@ async fn public_settings(State(state): State<AppState>) -> ApiResult<Json<Value>
         "home_content": home_content,
         "home_content_url": home_content_url,
         "home_content_html": home_content_html,
+        "default_theme": normalize_theme(value("default_theme")),
         "version": env!("CARGO_PKG_VERSION"),
         "registration_enabled": flag("registration_enabled", false),
         "email_verification_enabled": flag("email_verification_enabled", false),
@@ -78,6 +79,13 @@ async fn public_settings(State(state): State<AppState>) -> ApiResult<Json<Value>
         ,"turnstile_site_key": value("turnstile_site_key").unwrap_or("")
         ,"oauth_providers": oauth_providers
     }})))
+}
+
+pub(crate) fn normalize_theme(value: Option<&str>) -> &'static str {
+    match value {
+        Some("dark") => "dark",
+        _ => "light",
+    }
 }
 
 fn valid_public_link(value: &str) -> Option<String> {
@@ -341,6 +349,27 @@ mod tests {
             ..valid
         };
         assert!(date_bounds(&invalid).is_err());
+    }
+
+    #[tokio::test]
+    async fn public_settings_normalize_the_default_theme() {
+        let (_directory, state) = test_support::state().await;
+        let Json(initial) = public_settings(State(state.clone())).await.unwrap();
+        assert_eq!(initial["data"]["default_theme"], "light");
+
+        sqlx::query("INSERT INTO app_settings (key, value) VALUES ('default_theme', 'dark')")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let Json(dark) = public_settings(State(state.clone())).await.unwrap();
+        assert_eq!(dark["data"]["default_theme"], "dark");
+
+        sqlx::query("UPDATE app_settings SET value = 'unsupported' WHERE key = 'default_theme'")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        let Json(fallback) = public_settings(State(state)).await.unwrap();
+        assert_eq!(fallback["data"]["default_theme"], "light");
     }
 
     #[tokio::test]

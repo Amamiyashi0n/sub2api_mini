@@ -1,5 +1,8 @@
 "use strict";
 const API = location.origin;
+const THEME_STORAGE_KEY = "mini_theme";
+const initialTheme = normalizeTheme(localStorage.getItem(THEME_STORAGE_KEY));
+document.documentElement.dataset.theme = initialTheme;
 const state = {
 csrf: sessionStorage.getItem("mini_csrf") || "",
 user: null,
@@ -9,6 +12,8 @@ siteName: "Sub2API Mini",
 siteSubtitle: "个人 AI API 网关",
 siteLogo: "/logo.svg",
 version: "",
+defaultTheme: "light",
+theme: initialTheme,
 contactInfo: "",
 docUrl: "",
 homeContent: "",
@@ -93,6 +98,8 @@ chevron: '<path d="m9 18 6-6-6-6"/>',
 chevronDown: '<path d="m6 9 6 6 6-6"/>',
 panelClose: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M16 9l-3 3 3 3"/>',
 panelOpen: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M14 9l3 3-3 3"/>',
+sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.42"/>',
+moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
 logout: '<path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
 };
 const adminNavigation = [
@@ -187,6 +194,8 @@ try {
   state.siteSubtitle = settings.data.site_subtitle || state.siteSubtitle;
   state.siteLogo = settings.data.site_logo || state.siteLogo;
   state.version = settings.data.version || "";
+  state.defaultTheme = normalizeTheme(settings.data.default_theme);
+  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || state.defaultTheme);
   state.contactInfo = settings.data.contact_info || "";
   state.docUrl = settings.data.doc_url || "";
   state.homeContent = settings.data.home_content || "";
@@ -650,6 +659,26 @@ function identityInitials() {
 const value = String(state.displayName || state.user || "U").trim();
 return Array.from(value).slice(0, 2).join("").toUpperCase();
 }
+function normalizeTheme(theme) {
+return theme === "dark" ? "dark" : "light";
+}
+function applyTheme(theme, persist = false) {
+state.theme = normalizeTheme(theme);
+document.documentElement.dataset.theme = state.theme;
+document.documentElement.style.colorScheme = state.theme;
+document.querySelector('meta[name="theme-color"]')?.setAttribute("content", state.theme === "dark" ? "#0f172a" : "#f8fafc");
+if (persist) localStorage.setItem(THEME_STORAGE_KEY, state.theme);
+const button = document.querySelector("#theme-toggle");
+if (button) {
+  const target = state.theme === "dark" ? "亮色模式" : "暗色模式";
+  button.innerHTML = `${appIcon(state.theme === "dark" ? "sun" : "moon")}<span>${target}</span>`;
+  button.setAttribute("title", `切换到${target}`);
+  button.setAttribute("aria-pressed", String(state.theme === "dark"));
+}
+}
+function toggleTheme() {
+applyTheme(state.theme === "dark" ? "light" : "dark", true);
+}
 function setSidebarCollapsed(collapsed) {
 sidebarCollapsed = Boolean(collapsed);
 localStorage.setItem("mini_sidebar_collapsed", String(sidebarCollapsed));
@@ -697,7 +726,7 @@ app.innerHTML = `
       <nav class="nav-list" aria-label="主导航">
         ${sections.map(section => `<section class="nav-section" data-nav-section="${section.id}">${section.label ? `<h2>${escapeHtml(section.label)}</h2>` : ""}${renderNavigationItems(section.items, routeName)}</section>`).join("")}
       </nav>
-      <div class="sidebar-footer"><button id="sidebar-collapse" class="sidebar-control" type="button" aria-expanded="${!sidebarCollapsed}" title="${sidebarCollapsed ? "展开菜单" : "折叠菜单"}">${appIcon(sidebarCollapsed ? "panelOpen" : "panelClose")}<span>${sidebarCollapsed ? "展开菜单" : "折叠菜单"}</span></button></div>
+      <div class="sidebar-footer"><button id="theme-toggle" class="sidebar-control theme-control" type="button" aria-pressed="${state.theme === "dark"}" title="切换到${state.theme === "dark" ? "亮色模式" : "暗色模式"}">${appIcon(state.theme === "dark" ? "sun" : "moon")}<span>${state.theme === "dark" ? "亮色模式" : "暗色模式"}</span></button><button id="sidebar-collapse" class="sidebar-control collapse-control" type="button" aria-expanded="${!sidebarCollapsed}" title="${sidebarCollapsed ? "展开菜单" : "折叠菜单"}">${appIcon(sidebarCollapsed ? "panelOpen" : "panelClose")}<span>${sidebarCollapsed ? "展开菜单" : "折叠菜单"}</span></button></div>
     </aside>
     <div class="main-area">
       <header class="app-topbar">
@@ -715,6 +744,7 @@ document.querySelector("#logout-button")?.addEventListener("click", logout);
 document.querySelector("#mobile-nav-toggle")?.addEventListener("click", () => setMobileNavigation(!mobileNavigationOpen));
 document.querySelector("#mobile-nav-overlay")?.addEventListener("click", () => setMobileNavigation(false));
 document.querySelector("#sidebar-collapse")?.addEventListener("click", () => setSidebarCollapsed(!sidebarCollapsed));
+document.querySelector("#theme-toggle")?.addEventListener("click", toggleTheme);
 document.querySelector("#account-toggle")?.addEventListener("click", event => {
   event.stopPropagation();
   const menu = document.querySelector("#account-dropdown");
@@ -1933,7 +1963,10 @@ try {
     body: JSON.stringify({ display_name: form.elements.display_name.value }),
   });
   state.displayName = result.data.display_name;
-  document.querySelector(".sidebar-footer span").textContent = state.displayName;
+  const accountName = document.querySelector(".account-copy strong");
+  const dropdownName = document.querySelector(".account-dropdown-head strong");
+  if (accountName) accountName.textContent = state.displayName;
+  if (dropdownName) dropdownName.textContent = state.displayName;
   toast("个人资料已更新");
 } catch (requestError) {
   error.textContent = requestError.message;
@@ -2115,6 +2148,8 @@ page.innerHTML = `
         <div class="form-grid"><div class="field"><label for="setting-retries">故障切换次数</label><input id="setting-retries" name="retry_attempts" type="number" min="1" max="5" value="${settings.retry_attempts}" required></div><div class="field"><label for="setting-model-cache">模型缓存秒数</label><input id="setting-model-cache" name="model_cache_seconds" type="number" min="30" max="3600" value="${settings.model_cache_seconds}" required></div></div>
         <div class="form-grid"><div class="field"><label for="setting-5xx-cooldown">5xx 冷却秒数</label><input id="setting-5xx-cooldown" name="cooldown_5xx_seconds" type="number" min="1" max="600" value="${settings.cooldown_5xx_seconds}" required></div><div class="field"><label for="setting-429-cooldown">429 默认冷却秒数</label><input id="setting-429-cooldown" name="cooldown_429_seconds" type="number" min="1" max="3600" value="${settings.cooldown_429_seconds}" required></div></div>
         <div class="field"><label for="setting-audit-retention">审计保留天数</label><input id="setting-audit-retention" name="audit_retention_days" type="number" min="1" max="3650" value="${settings.audit_retention_days}" required></div>
+        <div class="settings-heading compact"><h2>界面外观</h2><p>没有保存个人选择的浏览器将使用默认主题。</p></div>
+        <div class="field"><span class="field-label">默认主题</span><div class="theme-segmented" role="radiogroup" aria-label="默认主题"><label><input type="radio" name="default_theme" value="light" ${settings.default_theme !== "dark" ? "checked" : ""}><span>${appIcon("sun")}亮色</span></label><label><input type="radio" name="default_theme" value="dark" ${settings.default_theme === "dark" ? "checked" : ""}><span>${appIcon("moon")}暗色</span></label></div><span class="field-hint">侧栏中的主题按钮仍可为当前浏览器单独选择主题。</span></div>
         <div class="settings-heading compact"><h2>账户开放策略</h2><p>验证码和找回邮件使用已选择的邮件传输方式。</p></div>
         <div class="check-row auth-settings">
           <label><input id="setting-registration" type="checkbox" ${settings.registration_enabled ? "checked" : ""}> 开放注册</label>
@@ -2199,6 +2234,8 @@ try {
   state.siteName = result.data.site_name;
   state.siteSubtitle = result.data.site_subtitle || "个人 AI API 网关";
   state.siteLogo = result.data.site_logo || "/logo.svg";
+  state.defaultTheme = normalizeTheme(result.data.default_theme);
+  if (!localStorage.getItem(THEME_STORAGE_KEY)) applyTheme(state.defaultTheme);
   state.contactInfo = result.data.contact_info || "";
   state.docUrl = result.data.doc_url || "";
   state.homeContent = result.data.home_content || "";
