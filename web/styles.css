@@ -304,26 +304,38 @@ select:focus-visible, textarea:focus-visible {
 .account-filters, .account-toolbar-actions { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .account-filters { flex: 1 1 620px; }
 .account-toolbar-actions { flex: 0 0 auto; justify-content: flex-end; }
-.account-filters select, .account-auto-refresh select { min-height: 40px; padding: 8px 30px 8px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; }
+.account-filters select { min-height: 40px; padding: 8px 30px 8px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; }
 .account-filters select { width: min(150px, 28vw); }
 .account-search { position: relative; width: min(260px, 100%); }
 .account-search .app-icon { position: absolute; z-index: 1; top: 10px; left: 11px; width: 18px; height: 18px; color: var(--muted); pointer-events: none; }
 .account-search input { width: 100%; min-height: 40px; padding: 8px 11px 8px 37px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; }
 .account-search input::placeholder { color: var(--muted); }
-.account-auto-refresh { min-width: 144px; display: grid; }
-.account-auto-refresh select { grid-area: 1 / 1; }
-.account-auto-refresh span { grid-area: 2 / 1; min-height: 14px; margin-top: 2px; color: var(--muted); font-size: .64rem; text-align: right; }
-.account-tools-dropdown { position: relative; }
-.account-tools-dropdown > button { min-height: 40px; }
-.account-tools-dropdown > button[aria-expanded="true"] .account-tools-chevron { transform: rotate(180deg); }
+.account-auto-refresh-dropdown, .account-tools-dropdown { position: relative; }
+.account-auto-refresh-dropdown > button, .account-tools-dropdown > button { min-height: 40px; }
+.account-auto-refresh-toggle { min-width: 146px; }
+.account-auto-refresh-toggle[aria-expanded="true"] .account-tools-chevron { transform: rotate(180deg); }
 .account-tools-chevron { width: 15px; height: 15px; transition: transform 150ms ease; }
-.account-tools-menu { position: absolute; z-index: 55; top: calc(100% + 6px); right: 0; width: 270px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-raised); }
-.account-tools-menu button { width: 100%; min-height: 52px; padding: 8px 10px; display: flex; align-items: center; gap: 10px; color: var(--ink); background: transparent; border-radius: 6px; text-align: left; }
+.account-auto-refresh-menu, .account-tools-menu { position: absolute; z-index: 55; top: calc(100% + 6px); right: 0; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-raised); }
+.account-auto-refresh-menu { width: 210px; }
+.account-auto-refresh-menu > p, .account-tools-menu section > p { margin: 3px 8px 5px; color: var(--muted); font-size: .66rem; font-weight: 700; letter-spacing: 0; }
+.account-auto-refresh-menu button { width: 100%; min-height: 36px; padding: 7px 9px; display: flex; align-items: center; justify-content: space-between; color: var(--ink); background: transparent; border-radius: 6px; text-align: left; font-size: .78rem; }
+.account-auto-refresh-menu button:hover, .account-auto-refresh-menu button.active { color: var(--green-strong); background: var(--green-soft); }
+.account-auto-refresh-menu button .app-icon { width: 16px; height: 16px; opacity: 0; }
+.account-auto-refresh-menu button.active .app-icon { opacity: 1; }
+.account-tools-menu { width: 284px; max-height: min(560px, calc(100vh - 90px)); overflow-y: auto; }
+.account-tools-menu section + section { margin-top: 5px; padding-top: 6px; border-top: 1px solid var(--line); }
+.account-tools-menu button { width: 100%; min-height: 50px; padding: 7px 9px; display: flex; align-items: center; gap: 10px; color: var(--ink); background: transparent; border-radius: 6px; text-align: left; }
 .account-tools-menu button:hover { background: var(--surface-soft); }
 .account-tools-menu button > span { min-width: 0; display: grid; }
 .account-tools-menu strong { font-size: .8rem; }
 .account-tools-menu small { margin-top: 2px; overflow: hidden; color: var(--muted); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.account-column-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px; }
+.account-column-menu > p { grid-column: 1 / -1; }
+.account-column-menu label { min-height: 34px; padding: 6px 8px; display: flex; align-items: center; gap: 8px; color: var(--ink); border-radius: 6px; cursor: pointer; font-size: .74rem; }
+.account-column-menu label:hover { background: var(--surface-soft); }
+.account-column-menu input { accent-color: var(--green); }
 .account-bulk-bar { min-height: 52px; margin-bottom: 10px; padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--green-strong); background: var(--green-soft); border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line)); border-radius: 8px; }
+.account-bulk-bar[hidden] { display: none; }
 .account-bulk-bar > div:first-child { display: flex; align-items: center; gap: 10px; }
 .account-bulk-bar strong { font-size: .8rem; }
 .account-selection-link { padding: 3px 0; color: var(--green-strong); background: transparent; font-size: .72rem; font-weight: 650; }
@@ -352,6 +364,26 @@ select:focus-visible, textarea:focus-visible {
 .account-action-popover button:hover { background: var(--surface-soft); }
 .account-action-popover .app-icon { width: 17px; height: 17px; color: var(--green); }
 .account-menu-divider { height: 1px; margin: 5px 3px; background: var(--line); }
+.account-mobile-list { display: none; }
+.account-mobile-select-all { min-height: 42px; padding: 0 12px; display: flex; align-items: center; gap: 9px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; font-size: .78rem; font-weight: 650; }
+.account-mobile-select-all small { margin-left: auto; color: var(--muted); font-weight: 500; }
+.account-mobile-card { overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); }
+.account-mobile-card > header { min-width: 0; padding: 13px 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; border-bottom: 1px solid var(--line); }
+.account-mobile-card > header > input { margin-top: 4px; }
+.account-mobile-identity { min-width: 0; display: grid; }
+.account-mobile-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .86rem; }
+.account-mobile-identity > span, .account-mobile-identity > small { overflow: hidden; color: var(--muted); font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.account-mobile-status { min-width: 0; display: grid; justify-items: end; }
+.account-mobile-status .cell-sub { max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-mobile-card dl { margin: 0; padding: 3px 12px; }
+.account-mobile-card dl > div { min-height: 43px; padding: 8px 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
+.account-mobile-card dl > div:last-child { border-bottom: 0; }
+.account-mobile-card dt { flex: 0 0 auto; color: var(--muted); font-size: .72rem; }
+.account-mobile-card dd { min-width: 0; max-width: 68%; margin: 0; text-align: right; font-size: .76rem; }
+.account-mobile-card dd .account-type-stack { justify-items: end; }
+.account-mobile-card dd .account-group-list { justify-content: flex-end; }
+.account-mobile-card dd .cell-sub { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-mobile-card > footer { min-height: 52px; padding: 4px 8px; display: flex; align-items: center; justify-content: flex-end; gap: 2px; border-top: 1px solid var(--line); background: var(--surface-soft); }
 .key-rate-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 2px; }
 .monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
 .monitor-card { border: 1px solid var(--line); border-radius: 6px; padding: 16px; background: var(--panel); }
@@ -949,13 +981,15 @@ tbody tr:hover { background: #fafbf9; }
   .account-filters { display: grid; grid-template-columns: 1fr 1fr; }
   .account-search { width: 100%; grid-column: 1 / -1; }
   .account-filters select { width: 100%; min-width: 0; }
-  .account-toolbar-actions { display: grid; grid-template-columns: 40px minmax(126px, 1fr) auto; }
-  .account-toolbar-actions > .button:last-child { grid-column: 1 / -1; }
-  .account-auto-refresh { min-width: 0; }
+  .account-toolbar-actions { display: grid; grid-template-columns: 40px 40px 40px minmax(126px, 1fr); }
+  .account-auto-refresh-toggle { width: 40px; min-width: 40px; padding: 0; }
+  .account-auto-refresh-toggle .account-refresh-label, .account-auto-refresh-toggle .account-tools-chevron { display: none; }
   .account-tools-dropdown { justify-self: end; }
-  .account-tools-dropdown > button { padding-inline: 10px; }
-  .account-tools-menu { right: 0; width: min(280px, calc(100vw - 24px)); }
+  .account-tools-menu { right: 0; width: min(284px, calc(100vw - 24px)); }
+  .account-auto-refresh-menu { right: auto; left: 0; }
   .account-bulk-bar { margin-inline: -2px; }
+  .account-table-wrap { display: none; }
+  .account-mobile-list { display: grid; gap: 10px; }
   .user-detail-summary { grid-template-columns: 1fr 1fr; }
   .ops-system-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ops-grid { grid-template-columns: 1fr; }
@@ -1142,7 +1176,6 @@ html[data-theme="dark"] .key-batch-bar select,
 html[data-theme="dark"] .user-batch-bar select,
 html[data-theme="dark"] .account-batch-bar select,
 html[data-theme="dark"] .account-filters select,
-html[data-theme="dark"] .account-auto-refresh select,
 html[data-theme="dark"] .account-search input { color: var(--ink); background: #111827; border-color: var(--line-strong); }
 html[data-theme="dark"] .field input::placeholder,
 html[data-theme="dark"] .field textarea::placeholder { color: #64748b; }
