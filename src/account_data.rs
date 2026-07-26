@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::{
+    Json, Router,
+    extract::{Query, State},
+    routing::get,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -113,6 +117,7 @@ struct ImportError {
 
 #[derive(Debug, FromRow)]
 struct AccountBackupRow {
+    id: i64,
     name: String,
     kind: String,
     base_url: String,
@@ -121,6 +126,11 @@ struct AccountBackupRow {
     concurrency: i32,
     enabled: bool,
     proxy_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ExportQuery {
+    ids: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -139,7 +149,11 @@ fn default_expiry_warn_days() -> i64 {
     7
 }
 
-async fn export_data(State(state): State<AppState>) -> ApiResult<Json<Value>> {
+async fn export_data(
+    State(state): State<AppState>,
+    Query(query): Query<ExportQuery>,
+) -> ApiResult<Json<Value>> {
+    let selected_ids = query.ids.as_deref().map(parse_export_ids).transpose()?;
     let proxy_rows = sqlx::query_as::<_, ProxyBackupRow>(
         "SELECT id, name, encrypted_url, enabled, fallback_mode, backup_proxy_id, \
          expiry_warn_days, expires_at FROM proxies ORDER BY id ASC",
@@ -189,13 +203,19 @@ async fn export_data(State(state): State<AppState>) -> ApiResult<Json<Value>> {
             .fetch_one(&state.pool)
             .await?;
     let rows = sqlx::query_as::<_, AccountBackupRow>(
-        "SELECT name, kind, base_url, encrypted_credentials, priority, concurrency, enabled, \
+        "SELECT id, name, kind, base_url, encrypted_credentials, priority, concurrency, enabled, \
          proxy_id FROM accounts WHERE parent_account_id IS NULL ORDER BY id ASC",
     )
     .fetch_all(&state.pool)
     .await?;
     let mut accounts = Vec::with_capacity(rows.len());
     for row in rows {
+        if selected_ids
+            .as_ref()
+            .is_some_and(|ids| !ids.contains(&row.id))
+        {
+            continue;
+        }
         let raw = state.crypto.decrypt(&row.encrypted_credentials)?;
         let credentials: Credentials = serde_json::from_slice(&raw)
             .map_err(|_| ApiError::internal("stored account credentials are malformed"))?;
@@ -233,6 +253,22 @@ async fn export_data(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         accounts,
         skipped_shadows,
     }})))
+}
+
+fn parse_export_ids(raw: &str) -> ApiResult<std::collections::HashSet<i64>> {
+    let ids = raw
+        .split(',')
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().parse::<i64>())
+        .collect::<Result<std::collections::HashSet<_>, _>>()
+        .map_err(|_| ApiError::bad_request("INVALID_ACCOUNT_IDS", "account ids are invalid"))?;
+    if ids.is_empty() || ids.len() > DATA_LIMIT || ids.iter().any(|id| *id <= 0) {
+        return Err(ApiError::bad_request(
+            "INVALID_ACCOUNT_IDS",
+            "account ids are invalid",
+        ));
+    }
+    Ok(ids)
 }
 
 async fn import_data(
@@ -814,7 +850,9 @@ mod tests {
         )
         .await
         .unwrap();
-        let Json(value) = export_data(State(state)).await.unwrap();
+        let Json(value) = export_data(State(state), Query(ExportQuery::default()))
+            .await
+            .unwrap();
         assert_eq!(value["data"]["type"], DATA_TYPE);
         assert_eq!(value["data"]["accounts"][0]["type"], "apikey");
         assert_eq!(
@@ -857,7 +895,9 @@ mod tests {
         .await
         .unwrap();
 
-        let Json(value) = export_data(State(state)).await.unwrap();
+        let Json(value) = export_data(State(state), Query(ExportQuery::default()))
+            .await
+            .unwrap();
         assert_eq!(value["data"]["accounts"].as_array().unwrap().len(), 1);
         assert_eq!(value["data"]["accounts"][0]["name"], "parent");
         assert_eq!(value["data"]["skipped_shadows"], 1);

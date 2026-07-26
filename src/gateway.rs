@@ -77,7 +77,8 @@ pub async fn available_model_catalog(state: &AppState) -> ApiResult<Value> {
          THEN proxies.encrypted_url WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 \
          AND (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) \
          THEN backup_proxies.encrypted_url ELSE NULL END AS encrypted_proxy_url, \
-         accounts.parent_account_id, accounts.quota_dimension, \
+         accounts.parent_account_id, accounts.quota_dimension, accounts.notes, \
+         accounts.crs_account_id, accounts.tls_fingerprint_profile_id, \
          accounts.created_at, accounts.updated_at FROM accounts \
          LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
          LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
@@ -327,7 +328,7 @@ async fn models(
     let mut last_error = None;
     let mut upstream_attempts = 0;
 
-    for _ in 0..runtime.retry_attempts {
+    for attempt in 0..runtime.retry_attempts {
         upstream_attempts += 1;
         let mut scheduled = state
             .scheduler
@@ -411,8 +412,8 @@ async fn models(
                 return json_response(StatusCode::OK, filter_models(value, &key.allowed_models));
             }
             Ok(response) => {
-                let status = response.status();
-                if retryable_status(status) {
+                let mut status = response.status();
+                if retryable_status(status) && attempt + 1 < runtime.retry_attempts {
                     cool_down_account(&state, scheduled.account.row.id, status, response.headers())
                         .await;
                     last_error = Some(ApiError::new(
@@ -422,7 +423,19 @@ async fn models(
                     ));
                     continue;
                 }
-                let body = response.bytes().await.unwrap_or_default();
+                if retryable_status(status) {
+                    cool_down_account(&state, scheduled.account.row.id, status, response.headers())
+                        .await;
+                }
+                let mut body = response.bytes().await.unwrap_or_default().to_vec();
+                let mut skip_monitoring = false;
+                if let Some(decision) =
+                    crate::error_passthrough::match_response(&state, status, &body).await?
+                {
+                    status = decision.status;
+                    body = decision.body;
+                    skip_monitoring = decision.skip_monitoring;
+                }
                 log_usage(
                     &state,
                     &request_id,
@@ -441,10 +454,10 @@ async fn models(
                     None,
                     started.elapsed(),
                     RequestTelemetry::with_attempts(upstream_attempts),
-                    Some(safe_error_summary(&body)),
+                    (!skip_monitoring).then(|| safe_error_summary(&body)),
                 )
                 .await;
-                return raw_response(status, "application/json", body);
+                return raw_response(status, "application/json", Bytes::from(body));
             }
             Err(error) => {
                 mark_transport_error(&state, scheduled.account.row.id, &error).await;
@@ -548,7 +561,7 @@ async fn proxy_json(
     let mut last_error = None;
     let mut upstream_attempts = 0;
 
-    for _ in 0..retry_attempts {
+    for attempt in 0..retry_attempts {
         upstream_attempts += 1;
         let mut scheduled = state
             .scheduler
@@ -611,7 +624,7 @@ async fn proxy_json(
             other => other,
         };
         match response {
-            Ok(response) if retryable_status(response.status()) => {
+            Ok(response) if retryable_status(response.status()) && attempt + 1 < retry_attempts => {
                 let status = response.status();
                 cool_down_account(&state, scheduled.account.row.id, status, response.headers())
                     .await;
@@ -622,7 +635,17 @@ async fn proxy_json(
                 ));
             }
             Ok(response) => {
-                clear_account_error(&state, scheduled.account.row.id).await;
+                if response.status().is_success() {
+                    clear_account_error(&state, scheduled.account.row.id).await;
+                } else if retryable_status(response.status()) {
+                    cool_down_account(
+                        &state,
+                        scheduled.account.row.id,
+                        response.status(),
+                        response.headers(),
+                    )
+                    .await;
+                }
                 return build_proxy_response(
                     state,
                     key,
@@ -706,7 +729,7 @@ async fn build_proxy_response(
     active_request: crate::state::ActiveRequestGuard,
     telemetry: RequestTelemetry,
 ) -> ApiResult<Response> {
-    let status = response.status();
+    let mut status = response.status();
     let content_type = response
         .headers()
         .get(header::CONTENT_TYPE)
@@ -818,8 +841,17 @@ async fn build_proxy_response(
         return Ok(result);
     }
 
-    let bytes = response.bytes().await.unwrap_or_default();
+    let mut bytes = response.bytes().await.unwrap_or_default().to_vec();
     drop(active_request);
+    let mut skip_monitoring = false;
+    if !status.is_success()
+        && let Some(decision) =
+            crate::error_passthrough::match_response(&state, status, &bytes).await?
+    {
+        status = decision.status;
+        bytes = decision.body;
+        skip_monitoring = decision.skip_monitoring;
+    }
     let parsed = serde_json::from_slice::<Value>(&bytes).ok();
     let usage = parsed.as_ref().map(extract_usage).unwrap_or_default();
     let upstream_model = parsed
@@ -840,7 +872,8 @@ async fn build_proxy_response(
     let account_stats_model = upstream_model
         .or_else(|| mapped_model.clone())
         .or_else(|| model.clone());
-    let error_summary = (!status.is_success()).then(|| safe_error_summary(&bytes));
+    let error_summary =
+        (!status.is_success() && !skip_monitoring).then(|| safe_error_summary(&bytes));
     let output = if convert_chat && status.is_success() {
         serde_json::to_vec(&responses_to_chat(parsed.as_ref().ok_or_else(|| {
             ApiError::new(
@@ -852,7 +885,7 @@ async fn build_proxy_response(
         .map(Bytes::from)
         .map_err(|_| ApiError::internal("response serialization failed"))?
     } else {
-        bytes
+        Bytes::from(bytes)
     };
     log_usage(
         &state,
@@ -900,7 +933,7 @@ async fn send_upstream(
     } else {
         Method::POST
     };
-    let client = state.client_for_account(account)?;
+    let client = state.client_for_account(account).await?;
     let mut request = client.request(method, url);
     for name in [
         "accept",

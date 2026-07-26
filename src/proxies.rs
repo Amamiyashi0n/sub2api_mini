@@ -1063,7 +1063,7 @@ mod tests {
             .await
             .unwrap();
         assert!(selected.account.proxy_url.is_none());
-        assert!(state.client_for_account(&selected.account).is_ok());
+        assert!(state.client_for_account(&selected.account).await.is_ok());
     }
 
     #[tokio::test]

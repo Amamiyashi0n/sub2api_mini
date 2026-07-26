@@ -99,5 +99,153 @@ window.Sub2MiniAccountTools = (() => {
     });
   }
 
-  return { attach };
+  async function openErrorRules() {
+    closeAccountToolsMenu();
+    openModal("错误透传规则", `<div class="boot-screen"><p>正在载入</p></div>`, `<button class="button secondary" data-close-modal>关闭</button><button class="button" id="add-error-rule">添加规则</button>`);
+    try {
+      const result = await api("/api/admin/error-passthrough-rules");
+      renderErrorRules(result.data);
+    } catch (error) { modal.querySelector(".modal-body").innerHTML = emptyState("载入失败", error.message); }
+  }
+
+  function renderErrorRules(rules) {
+    const body = modal.querySelector(".modal-body");
+    body.innerHTML = rules.length ? `<div class="table-wrap"><table><thead><tr><th>规则</th><th>匹配</th><th>响应</th><th>状态</th><th>操作</th></tr></thead><tbody>${rules.map(rule => `<tr><td><span class="cell-main">${escapeHtml(rule.name)}</span><span class="cell-sub">优先级 ${rule.priority}</span></td><td><span class="cell-main">${rule.error_codes.length ? rule.error_codes.join(", ") : "任意状态码"}</span><span class="cell-sub">${escapeHtml(rule.keywords.join(", ") || "无关键词")} · ${rule.match_mode === "all" ? "全部匹配" : "任一匹配"}</span></td><td><span class="cell-main">${rule.passthrough_code ? "透传状态码" : `改为 ${rule.response_code}`}</span><span class="cell-sub">${rule.passthrough_body ? "透传响应体" : escapeHtml(rule.custom_message || "自定义消息")}</span></td><td>${rule.enabled ? status("启用") : status("停用", "off")}</td><td><div class="cell-actions"><button class="button quiet small" data-error-rule-edit="${rule.id}">编辑</button><button class="button quiet small" data-error-rule-delete="${rule.id}">删除</button></div></td></tr>`).join("")}</tbody></table></div>` : emptyState("暂无错误透传规则", "添加后将按优先级匹配上游错误响应");
+    modal.querySelector("#add-error-rule").onclick = () => openErrorRuleForm();
+    body.querySelectorAll("[data-error-rule-edit]").forEach(button => button.addEventListener("click", () => openErrorRuleForm(rules.find(rule => String(rule.id) === button.dataset.errorRuleEdit))));
+    body.querySelectorAll("[data-error-rule-delete]").forEach(button => button.addEventListener("click", async () => {
+      const rule = rules.find(item => String(item.id) === button.dataset.errorRuleDelete);
+      if (!confirm(`确认删除规则“${rule?.name || button.dataset.errorRuleDelete}”？`)) return;
+      button.disabled = true;
+      try { await api(`/api/admin/error-passthrough-rules/${button.dataset.errorRuleDelete}`, { method: "DELETE" }); toast("错误透传规则已删除"); await openErrorRules(); }
+      catch (error) { toast(error.message, true); button.disabled = false; }
+    }));
+  }
+
+  function openErrorRuleForm(rule = null) {
+    openModal(rule ? "编辑错误透传规则" : "添加错误透传规则", `<form id="error-rule-form">
+      <div class="form-grid"><div class="field"><label for="error-rule-name">名称</label><input id="error-rule-name" name="name" maxlength="100" value="${escapeHtml(rule?.name || "")}" required autofocus></div><div class="field"><label for="error-rule-priority">优先级</label><input id="error-rule-priority" name="priority" type="number" value="${rule?.priority ?? 0}" required></div></div>
+      <div class="form-grid"><div class="field"><label for="error-rule-codes">HTTP 状态码</label><input id="error-rule-codes" name="error_codes" value="${escapeHtml((rule?.error_codes || []).join(", "))}" placeholder="400, 429, 502"></div><div class="field"><label for="error-rule-mode">匹配方式</label><select id="error-rule-mode" name="match_mode"><option value="any" ${rule?.match_mode !== "all" ? "selected" : ""}>任一条件</option><option value="all" ${rule?.match_mode === "all" ? "selected" : ""}>全部条件</option></select></div></div>
+      <div class="field"><label for="error-rule-keywords">响应关键词</label><input id="error-rule-keywords" name="keywords" value="${escapeHtml((rule?.keywords || []).join(", "))}" placeholder="context limit, rate limit"><span class="field-hint">状态码和关键词至少填写一项，关键词不区分大小写</span></div>
+      <div class="form-grid"><label class="switch-row"><span><strong>透传状态码</strong><small>关闭后使用右侧状态码</small></span><input name="passthrough_code" type="checkbox" ${rule?.passthrough_code === false ? "" : "checked"}></label><div class="field"><label for="error-rule-response-code">替换状态码</label><input id="error-rule-response-code" name="response_code" type="number" min="100" max="599" value="${rule?.response_code || 502}"></div></div>
+      <label class="switch-row"><span><strong>透传响应体</strong><small>关闭后返回自定义错误消息</small></span><input name="passthrough_body" type="checkbox" ${rule?.passthrough_body === false ? "" : "checked"}></label>
+      <div class="field"><label for="error-rule-message">自定义消息</label><input id="error-rule-message" name="custom_message" value="${escapeHtml(rule?.custom_message || "")}" placeholder="上游请求失败"></div>
+      <div class="form-grid"><label class="switch-row"><span><strong>启用规则</strong></span><input name="enabled" type="checkbox" ${rule?.enabled === false ? "" : "checked"}></label><label class="switch-row"><span><strong>跳过错误监控</strong></span><input name="skip_monitoring" type="checkbox" ${rule?.skip_monitoring ? "checked" : ""}></label></div>
+      <div class="field"><label for="error-rule-description">说明</label><textarea class="compact-textarea" id="error-rule-description" name="description">${escapeHtml(rule?.description || "")}</textarea></div>
+      <p class="form-error" id="error-rule-error"></p></form>`, `<button class="button secondary" id="back-error-rules">返回</button><button class="button" id="save-error-rule">保存</button>`);
+    modal.querySelector("#back-error-rules").addEventListener("click", openErrorRules);
+    modal.querySelector("#save-error-rule").addEventListener("click", async event => {
+      const form = modal.querySelector("#error-rule-form");
+      if (!form.reportValidity()) return;
+      const values = Object.fromEntries(new FormData(form));
+      const parseNumbers = value => String(value || "").split(/[\s,]+/).filter(Boolean).map(Number);
+      const parseWords = value => String(value || "").split(",").map(item => item.trim()).filter(Boolean);
+      const payload = { name: values.name, priority: Number(values.priority), error_codes: parseNumbers(values.error_codes), keywords: parseWords(values.keywords), match_mode: values.match_mode, platforms: ["openai"], passthrough_code: form.elements.passthrough_code.checked, response_code: Number(values.response_code), passthrough_body: form.elements.passthrough_body.checked, custom_message: values.custom_message || null, enabled: form.elements.enabled.checked, skip_monitoring: form.elements.skip_monitoring.checked, description: values.description || null };
+      event.currentTarget.disabled = true;
+      try { await api(rule ? `/api/admin/error-passthrough-rules/${rule.id}` : "/api/admin/error-passthrough-rules", { method: rule ? "PUT" : "POST", body: JSON.stringify(payload) }); toast(rule ? "错误透传规则已更新" : "错误透传规则已添加"); await openErrorRules(); }
+      catch (error) { modal.querySelector("#error-rule-error").textContent = error.message; event.currentTarget.disabled = false; }
+    });
+  }
+
+  async function openTlsProfiles() {
+    closeAccountToolsMenu();
+    openModal("TLS 指纹模板", `<div class="boot-screen"><p>正在载入</p></div>`, `<button class="button secondary" data-close-modal>关闭</button><button class="button" id="add-tls-profile">添加模板</button>`);
+    try {
+      const result = await api("/api/admin/tls-fingerprint-profiles");
+      currentTlsProfiles = result.data;
+      renderTlsProfiles(result.data);
+    } catch (error) { modal.querySelector(".modal-body").innerHTML = emptyState("载入失败", error.message); }
+  }
+
+  function renderTlsProfiles(profiles) {
+    const body = modal.querySelector(".modal-body");
+    body.innerHTML = profiles.length ? `<div class="table-wrap"><table><thead><tr><th>模板</th><th>TLS 版本</th><th>ALPN</th><th>参数</th><th>操作</th></tr></thead><tbody>${profiles.map(profile => `<tr><td><span class="cell-main">${escapeHtml(profile.name)}</span><span class="cell-sub">${escapeHtml(profile.description || "-")}</span></td><td class="mono">${escapeHtml(profile.supported_versions.map(tlsValue).join(", ") || "默认")}</td><td class="mono">${escapeHtml(profile.alpn_protocols.join(", ") || "默认")}</td><td><span class="cell-sub">${profile.cipher_suites.length} 套件 · ${profile.key_share_groups.length || profile.curves.length} 组</span></td><td><div class="cell-actions"><button class="button quiet small" data-tls-edit="${profile.id}">编辑</button><button class="button quiet small" data-tls-delete="${profile.id}">删除</button></div></td></tr>`).join("")}</tbody></table></div>` : emptyState("暂无 TLS 指纹模板", "添加后可在账号新增或编辑时绑定");
+    modal.querySelector("#add-tls-profile").onclick = () => openTlsProfileForm();
+    body.querySelectorAll("[data-tls-edit]").forEach(button => button.addEventListener("click", () => openTlsProfileForm(profiles.find(profile => String(profile.id) === button.dataset.tlsEdit))));
+    body.querySelectorAll("[data-tls-delete]").forEach(button => button.addEventListener("click", async () => {
+      const profile = profiles.find(item => String(item.id) === button.dataset.tlsDelete);
+      if (!confirm(`确认删除 TLS 模板“${profile?.name || button.dataset.tlsDelete}”？绑定账号将恢复默认 TLS。`)) return;
+      button.disabled = true;
+      try { await api(`/api/admin/tls-fingerprint-profiles/${button.dataset.tlsDelete}`, { method: "DELETE" }); toast("TLS 指纹模板已删除"); await openTlsProfiles(); }
+      catch (error) { toast(error.message, true); button.disabled = false; }
+    }));
+  }
+
+  function tlsValue(value) { return Number(value) === 0x0304 ? "TLS 1.3" : Number(value) === 0x0303 ? "TLS 1.2" : `0x${Number(value).toString(16)}`; }
+  function arrayValue(profile, key) { return escapeHtml((profile?.[key] || []).join(", ")); }
+
+  function openTlsProfileForm(profile = null) {
+    const arrayField = (key, label, placeholder = "") => `<div class="field"><label for="tls-${key}">${label}</label><input id="tls-${key}" name="${key}" value="${arrayValue(profile, key)}" placeholder="${placeholder}"></div>`;
+    openModal(profile ? "编辑 TLS 指纹模板" : "添加 TLS 指纹模板", `<form id="tls-profile-form">
+      <div class="form-grid"><div class="field"><label for="tls-name">名称</label><input id="tls-name" name="name" maxlength="100" value="${escapeHtml(profile?.name || "")}" required autofocus></div><label class="switch-row"><span><strong>GREASE</strong><small>记录配置；rustls 会使用自身兼容策略</small></span><input name="enable_grease" type="checkbox" ${profile?.enable_grease ? "checked" : ""}></label></div>
+      <div class="field"><label for="tls-description">说明</label><input id="tls-description" name="description" value="${escapeHtml(profile?.description || "")}"></div>
+      <details class="tool-import-details"><summary>粘贴 JSON 或 YAML 参数</summary><div class="field"><textarea class="compact-textarea" id="tls-import" spellcheck="false" placeholder="cipher_suites: [4865, 4866]\nalpn_protocols: [h2, http/1.1]"></textarea></div><button class="button secondary small" id="apply-tls-import" type="button">填入表单</button></details>
+      <div class="form-grid">${arrayField("cipher_suites", "Cipher Suites", "4865, 4866, 4867")}${arrayField("supported_versions", "TLS 版本", "772, 771")}${arrayField("curves", "Curves", "29, 23, 24")}${arrayField("key_share_groups", "Key Share Groups", "29, 23")}${arrayField("signature_algorithms", "Signature Algorithms")}${arrayField("point_formats", "Point Formats", "0")}${arrayField("psk_modes", "PSK Modes")}${arrayField("extensions", "Extensions")}${arrayField("alpn_protocols", "ALPN", "h2, http/1.1")}</div>
+      <p class="form-error" id="tls-profile-error"></p></form>`, `<button class="button secondary" id="back-tls-profiles">返回</button><button class="button" id="save-tls-profile">保存</button>`);
+    modal.querySelector("#back-tls-profiles").addEventListener("click", openTlsProfiles);
+    modal.querySelector("#apply-tls-import").addEventListener("click", () => applyTlsImport(modal.querySelector("#tls-import").value));
+    modal.querySelector("#save-tls-profile").addEventListener("click", async event => {
+      const form = modal.querySelector("#tls-profile-form");
+      if (!form.reportValidity()) return;
+      const values = Object.fromEntries(new FormData(form));
+      const numbers = value => String(value || "").split(/[\s,]+/).filter(Boolean).map(item => Number(item));
+      const payload = { name: values.name, description: values.description || null, enable_grease: form.elements.enable_grease.checked, cipher_suites: numbers(values.cipher_suites), curves: numbers(values.curves), point_formats: numbers(values.point_formats), signature_algorithms: numbers(values.signature_algorithms), alpn_protocols: String(values.alpn_protocols || "").split(/[\s,]+/).filter(Boolean), supported_versions: numbers(values.supported_versions), key_share_groups: numbers(values.key_share_groups), psk_modes: numbers(values.psk_modes), extensions: numbers(values.extensions) };
+      event.currentTarget.disabled = true;
+      try { await api(profile ? `/api/admin/tls-fingerprint-profiles/${profile.id}` : "/api/admin/tls-fingerprint-profiles", { method: profile ? "PUT" : "POST", body: JSON.stringify(payload) }); toast(profile ? "TLS 指纹模板已更新" : "TLS 指纹模板已添加"); await openTlsProfiles(); }
+      catch (error) { modal.querySelector("#tls-profile-error").textContent = error.message; event.currentTarget.disabled = false; }
+    });
+  }
+
+  function applyTlsImport(raw) {
+    try {
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch (_) {
+        parsed = {};
+        raw.split(/\r?\n/).forEach(line => {
+          const match = line.match(/^\s*([a-z_]+)\s*:\s*\[?(.*?)\]?\s*$/i);
+          if (match) parsed[match[1]] = match[2].split(",").map(item => item.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+        });
+      }
+      ["cipher_suites", "curves", "point_formats", "signature_algorithms", "alpn_protocols", "supported_versions", "key_share_groups", "psk_modes", "extensions"].forEach(key => {
+        if (Array.isArray(parsed[key])) modal.querySelector(`[name="${key}"]`).value = parsed[key].join(", ");
+      });
+      toast("TLS 参数已填入表单");
+    } catch (error) { modal.querySelector("#tls-profile-error").textContent = error.message || "无法解析 TLS 参数"; }
+  }
+
+  function openCrsSync() {
+    closeAccountToolsMenu();
+    openModal("从 CRS 同步", `<form id="crs-sync-form"><div class="sensitive-notice"><strong>同步规则</strong><span>已存在账号始终更新；新账号可在预览后选择。Mini 只同步 OpenAI OAuth 与 Responses API Key 账号。</span></div><div class="field"><label for="crs-base-url">CRS 地址</label><input id="crs-base-url" name="base_url" type="url" placeholder="http://127.0.0.1:3000" required autofocus></div><div class="form-grid"><div class="field"><label for="crs-username">用户名</label><input id="crs-username" name="username" autocomplete="username" required></div><div class="field"><label for="crs-password">密码</label><input id="crs-password" name="password" type="password" autocomplete="current-password" required></div></div><label class="switch-row"><span><strong>同步代理</strong><small>为 CRS 账号复用或创建网络代理</small></span><input name="sync_proxies" type="checkbox" checked></label><p class="form-error" id="crs-sync-error"></p></form>`, `<button class="button secondary" data-close-modal>取消</button><button class="button" id="preview-crs-sync">预览</button>`);
+    modal.querySelector("#preview-crs-sync").addEventListener("click", previewCrsSync);
+  }
+
+  async function previewCrsSync(event) {
+    const form = modal.querySelector("#crs-sync-form");
+    if (!form.reportValidity()) return;
+    const values = Object.fromEntries(new FormData(form));
+    const request = { base_url: values.base_url, username: values.username, password: values.password, sync_proxies: form.elements.sync_proxies.checked };
+    event.currentTarget.disabled = true;
+    try {
+      const result = await api("/api/admin/accounts/sync/crs/preview", { method: "POST", body: JSON.stringify(request) });
+      const data = result.data;
+      const newRows = data.new_accounts || [];
+      openModal("从 CRS 同步 · 预览", `<form id="crs-preview-form"><div class="import-summary"><span>现有账号 <strong>${data.existing_accounts.length}</strong></span><span>新增账号 <strong>${newRows.length}</strong></span><span>不支持 <strong>${data.unsupported_count || 0}</strong></span></div>${data.existing_accounts.length ? `<section class="crs-preview-section"><h3>将更新的账号</h3>${data.existing_accounts.map(item => `<div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.kind)}</span></div>`).join("")}</section>` : ""}${newRows.length ? `<section class="crs-preview-section"><h3>选择要新增的账号</h3>${newRows.map(item => `<label><input type="checkbox" name="crs_account_id" value="${escapeHtml(item.crs_account_id)}" checked><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.kind)}</small></span></label>`).join("")}</section>` : emptyState("没有新账号", "继续后仍会更新已存在账号")}<p class="form-error" id="crs-sync-error"></p></form>`, `<button class="button secondary" id="back-crs-sync">返回</button><button class="button" id="run-crs-sync">开始同步</button>`);
+      modal.querySelector("#back-crs-sync").addEventListener("click", openCrsSync);
+      modal.querySelector("#run-crs-sync").addEventListener("click", click => runCrsSync(request, click.currentTarget));
+    } catch (error) { modal.querySelector("#crs-sync-error").textContent = error.message; event.currentTarget.disabled = false; }
+  }
+
+  async function runCrsSync(request, button) {
+    request.selected_new_account_ids = [...modal.querySelectorAll("[name=crs_account_id]:checked")].map(input => input.value);
+    button.disabled = true;
+    try {
+      const result = await api("/api/admin/accounts/sync/crs", { method: "POST", body: JSON.stringify(request) });
+      const data = result.data;
+      openModal("CRS 同步完成", `<div class="import-summary"><span>新增 <strong>${data.created}</strong></span><span>更新 <strong>${data.updated}</strong></span><span>失败 <strong>${data.failed}</strong></span></div>${data.items?.length ? `<div class="import-errors">${data.items.map(item => `<div><strong>${escapeHtml(item.name || item.crs_account_id)}</strong><span>${escapeHtml(item.action)}${item.error ? ` · ${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}`, `<button class="button" id="finish-crs-sync">完成</button>`);
+      modal.querySelector("#finish-crs-sync").addEventListener("click", async () => { closeModal(); await renderRoute(); });
+    } catch (error) { modal.querySelector("#crs-sync-error").textContent = error.message; button.disabled = false; }
+  }
+
+  return { attach, openCrsSync, openErrorRules, openTlsProfiles };
 })();

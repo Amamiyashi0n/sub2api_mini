@@ -24,6 +24,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(crate::batch_images::admin_router())
         .merge(crate::account_data::admin_router())
         .merge(crate::account_tools::admin_router())
+        .merge(crate::crs_sync::admin_router())
+        .merge(crate::error_passthrough::admin_router())
+        .merge(crate::tls_fingerprint::admin_router())
         .merge(crate::scheduled_tests::admin_router())
         .route("/accounts", get(list_accounts).post(create_account))
         .route("/accounts/bulk-update", post(bulk_update_accounts))
@@ -371,7 +374,8 @@ async fn list_accounts(State(state): State<AppState>) -> ApiResult<Json<Value>> 
          THEN proxies.encrypted_url WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 \
          AND (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) \
          THEN backup_proxies.encrypted_url ELSE NULL END AS encrypted_proxy_url, \
-         accounts.parent_account_id, accounts.quota_dimension, \
+         accounts.parent_account_id, accounts.quota_dimension, accounts.notes, \
+         accounts.crs_account_id, accounts.tls_fingerprint_profile_id, \
          accounts.created_at, accounts.updated_at FROM accounts \
          LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
          LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
@@ -379,9 +383,49 @@ async fn list_accounts(State(state): State<AppState>) -> ApiResult<Json<Value>> 
     )
     .fetch_all(&state.pool)
     .await?;
-    Ok(Json(json!({
-        "data": rows.iter().map(AccountRow::public).collect::<Vec<_>>()
-    })))
+    let (offset_minutes, _) = crate::groups::server_utc_offset();
+    let offset_modifier = format!("{offset_minutes:+} minutes");
+    let today_rows: Vec<(i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT account_id, COUNT(*), COALESCE(SUM(COALESCE(total_tokens, 0)), 0), \
+         COALESCE(SUM(account_cost_microusd), 0) FROM usage_logs \
+         WHERE account_id IS NOT NULL AND date(created_at, ?) = date('now', ?) \
+         GROUP BY account_id",
+    )
+    .bind(&offset_modifier)
+    .bind(&offset_modifier)
+    .fetch_all(&state.pool)
+    .await?;
+    let today = today_rows
+        .into_iter()
+        .map(|row| (row.0, (row.1, row.2, row.3)))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut data = Vec::with_capacity(rows.len());
+    for row in rows {
+        let active = state.scheduler.active_for(row.id, row.concurrency).await;
+        let mut value = serde_json::to_value(row.public())
+            .map_err(|_| ApiError::internal("account serialization failed"))?;
+        let Some(object) = value.as_object_mut() else {
+            return Err(ApiError::internal("account serialization failed"));
+        };
+        object.insert("current_concurrency".into(), json!(active));
+        let stats = today.get(&row.id).copied().unwrap_or_default();
+        object.insert(
+            "today_stats".into(),
+            json!({"requests": stats.0, "tokens": stats.1, "cost_microusd": stats.2}),
+        );
+        if let Ok(account) = state.resolve_account(row).await {
+            object.insert("email".into(), json!(account.credentials.email));
+            object.insert(
+                "expires_at".into(),
+                json!(account.credentials.expires_at.and_then(|timestamp| {
+                    chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp, 0)
+                        .map(|value| value.to_rfc3339())
+                })),
+            );
+        }
+        data.push(value);
+    }
+    Ok(Json(json!({"data": data})))
 }
 
 #[derive(Deserialize)]
@@ -398,6 +442,10 @@ struct CreateAccountInput {
     concurrency: i32,
     #[serde(default)]
     proxy_id: Option<i64>,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    tls_fingerprint_profile_id: Option<i64>,
 }
 
 fn default_api_key_kind() -> String {
@@ -429,14 +477,16 @@ async fn create_account(
     }
     let base_url = normalize_base_url(&input.base_url, "api_key")?;
     validate_proxy_id(&state, input.proxy_id).await?;
+    validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
+    validate_notes(&input.notes)?;
     let credentials = Credentials {
         api_key: Some(input.api_key.trim().to_string()),
         ..Default::default()
     };
     let encrypted = encrypt_credentials(&state, &credentials)?;
     let result = sqlx::query(
-        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, proxy_id) \
-         VALUES (?, 'api_key', ?, ?, ?, ?, ?)",
+        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, \
+         proxy_id, notes, tls_fingerprint_profile_id) VALUES (?, 'api_key', ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(input.name.trim())
     .bind(base_url)
@@ -444,6 +494,8 @@ async fn create_account(
     .bind(input.priority)
     .bind(input.concurrency)
     .bind(input.proxy_id)
+    .bind(input.notes.trim())
+    .bind(input.tls_fingerprint_profile_id)
     .execute(&state.pool)
     .await?;
     Ok((
@@ -462,6 +514,9 @@ struct UpdateAccountInput {
     enabled: Option<bool>,
     #[serde(default, deserialize_with = "crate::models::deserialize_nullable")]
     proxy_id: Option<Option<i64>>,
+    notes: Option<String>,
+    #[serde(default, deserialize_with = "crate::models::deserialize_nullable")]
+    tls_fingerprint_profile_id: Option<Option<i64>>,
 }
 
 async fn update_account(
@@ -471,7 +526,11 @@ async fn update_account(
 ) -> ApiResult<Json<Value>> {
     let row = get_account_row(&state, id).await?;
     if row.parent_account_id.is_some() {
-        if input.base_url.is_some() || input.api_key.is_some() || input.proxy_id.is_some() {
+        if input.base_url.is_some()
+            || input.api_key.is_some()
+            || input.proxy_id.is_some()
+            || input.tls_fingerprint_profile_id.is_some()
+        {
             return Err(ApiError::bad_request(
                 "SPARK_SHADOW_CREDENTIALS_INHERITED",
                 "Spark shadow credentials, Base URL, and proxy are inherited from the parent account",
@@ -480,9 +539,11 @@ async fn update_account(
         let name = input.name.unwrap_or_else(|| row.name.clone());
         let priority = input.priority.unwrap_or(row.priority);
         let concurrency = input.concurrency.unwrap_or(row.concurrency);
+        let notes = input.notes.unwrap_or_else(|| row.notes.clone());
         validate_account_fields(&name, priority, concurrency)?;
+        validate_notes(&notes)?;
         sqlx::query(
-            "UPDATE accounts SET name = ?, priority = ?, concurrency = ?, enabled = ?, \
+            "UPDATE accounts SET name = ?, priority = ?, concurrency = ?, enabled = ?, notes = ?, \
              cooldown_until = CASE WHEN ? = 1 THEN NULL ELSE cooldown_until END, \
              last_error = CASE WHEN ? = 1 THEN NULL ELSE last_error END, \
              updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -491,6 +552,7 @@ async fn update_account(
         .bind(priority)
         .bind(concurrency)
         .bind(input.enabled.unwrap_or(row.enabled))
+        .bind(notes.trim())
         .bind(input.enabled.unwrap_or(row.enabled))
         .bind(input.enabled.unwrap_or(row.enabled))
         .bind(id)
@@ -501,7 +563,9 @@ async fn update_account(
     let name = input.name.unwrap_or_else(|| row.name.clone());
     let priority = input.priority.unwrap_or(row.priority);
     let concurrency = input.concurrency.unwrap_or(row.concurrency);
+    let notes = input.notes.unwrap_or_else(|| row.notes.clone());
     validate_account_fields(&name, priority, concurrency)?;
+    validate_notes(&notes)?;
     let base_url = match input.base_url {
         Some(value) => normalize_base_url(&value, &row.kind)?,
         None => row.base_url.clone(),
@@ -520,9 +584,14 @@ async fn update_account(
     let proxy_changed = input.proxy_id.is_some();
     let proxy_id = input.proxy_id.unwrap_or(row.proxy_id);
     validate_proxy_id(&state, proxy_id).await?;
+    let tls_profile_changed = input.tls_fingerprint_profile_id.is_some();
+    let tls_fingerprint_profile_id = input
+        .tls_fingerprint_profile_id
+        .unwrap_or(row.tls_fingerprint_profile_id);
+    validate_tls_profile_id(&state, tls_fingerprint_profile_id).await?;
     sqlx::query(
         "UPDATE accounts SET name = ?, base_url = ?, encrypted_credentials = ?, priority = ?, \
-         concurrency = ?, enabled = ?, proxy_id = ?, \
+         concurrency = ?, enabled = ?, proxy_id = ?, notes = ?, tls_fingerprint_profile_id = ?, \
          cooldown_until = CASE WHEN ? = 1 THEN NULL ELSE cooldown_until END, \
          last_error = CASE WHEN ? = 1 THEN NULL ELSE last_error END, \
          updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -534,6 +603,8 @@ async fn update_account(
     .bind(concurrency)
     .bind(input.enabled.unwrap_or(row.enabled))
     .bind(proxy_id)
+    .bind(notes.trim())
+    .bind(tls_fingerprint_profile_id)
     .bind(input.enabled.unwrap_or(row.enabled))
     .bind(input.enabled.unwrap_or(row.enabled))
     .bind(id)
@@ -548,6 +619,9 @@ async fn update_account(
         .bind(id)
         .execute(&state.pool)
         .await?;
+    }
+    if proxy_changed || tls_profile_changed {
+        state.tls_clients.lock().await.clear();
     }
     Ok(Json(json!({"data": {"id": id}})))
 }
@@ -587,6 +661,7 @@ async fn bulk_update_accounts(
     State(state): State<AppState>,
     Json(input): Json<BulkUpdateAccountsInput>,
 ) -> ApiResult<Json<Value>> {
+    let proxy_changed = input.proxy_id.is_some();
     let ids = normalize_account_ids(input.account_ids, 500)?;
     let enabled = input.enabled.or(input.schedulable);
     if input.priority.is_none()
@@ -697,6 +772,9 @@ async fn bulk_update_accounts(
         success_ids.push(id);
     }
     transaction.commit().await?;
+    if proxy_changed {
+        state.tls_clients.lock().await.clear();
+    }
     Ok(Json(
         json!({"data": account_batch_result(success_ids, errors)}),
     ))
@@ -928,6 +1006,10 @@ struct ImportOAuthInput {
     concurrency: i32,
     #[serde(default)]
     proxy_id: Option<i64>,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    tls_fingerprint_profile_id: Option<i64>,
 }
 
 async fn import_oauth(
@@ -936,6 +1018,8 @@ async fn import_oauth(
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     let credentials = oauth::parse_import(&input.content)?;
     validate_proxy_id(&state, input.proxy_id).await?;
+    validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
+    validate_notes(&input.notes)?;
     let name = if input.name.trim().is_empty() {
         credentials
             .email
@@ -952,13 +1036,16 @@ async fn import_oauth(
         input.concurrency,
     )
     .await?;
-    if let Some(proxy_id) = input.proxy_id {
-        sqlx::query("UPDATE accounts SET proxy_id = ? WHERE id = ?")
-            .bind(proxy_id)
-            .bind(id)
-            .execute(&state.pool)
-            .await?;
-    }
+    sqlx::query(
+        "UPDATE accounts SET proxy_id = ?, notes = ?, tls_fingerprint_profile_id = ?, \
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+    .bind(input.proxy_id)
+    .bind(input.notes.trim())
+    .bind(input.tls_fingerprint_profile_id)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
     Ok((StatusCode::CREATED, Json(json!({"data": {"id": id}}))))
 }
 
@@ -1317,7 +1404,8 @@ pub(crate) async fn get_account_row(state: &AppState, id: i64) -> ApiResult<Acco
          THEN proxies.encrypted_url WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 \
          AND (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) \
          THEN backup_proxies.encrypted_url ELSE NULL END AS encrypted_proxy_url, \
-         accounts.parent_account_id, accounts.quota_dimension, \
+         accounts.parent_account_id, accounts.quota_dimension, accounts.notes, \
+         accounts.crs_account_id, accounts.tls_fingerprint_profile_id, \
          accounts.created_at, accounts.updated_at FROM accounts \
          LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
          LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
@@ -1339,6 +1427,32 @@ async fn validate_proxy_id(state: &AppState, id: Option<i64>) -> ApiResult<()> {
         return Err(ApiError::bad_request(
             "INVALID_PROXY",
             "selected proxy does not exist",
+        ));
+    }
+    Ok(())
+}
+
+async fn validate_tls_profile_id(state: &AppState, id: Option<i64>) -> ApiResult<()> {
+    let Some(id) = id else { return Ok(()) };
+    let exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM tls_fingerprint_profiles WHERE id = ?")
+            .bind(id)
+            .fetch_one(&state.pool)
+            .await?;
+    if exists == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_TLS_FINGERPRINT_PROFILE",
+            "selected TLS fingerprint profile does not exist",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_notes(notes: &str) -> ApiResult<()> {
+    if notes.chars().count() > 1000 {
+        return Err(ApiError::bad_request(
+            "INVALID_ACCOUNT_NOTES",
+            "account notes cannot exceed 1000 characters",
         ));
     }
     Ok(())

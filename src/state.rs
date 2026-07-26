@@ -35,6 +35,7 @@ pub struct AppState {
     pub started_at: Instant,
     pub active_requests: Arc<AtomicUsize>,
     pub prompt_audit_slots: Arc<DynamicSlots>,
+    pub tls_clients: Arc<Mutex<HashMap<String, Client>>>,
 }
 
 impl AppState {
@@ -60,6 +61,7 @@ impl AppState {
             started_at: Instant::now(),
             active_requests: Arc::new(AtomicUsize::new(0)),
             prompt_audit_slots: Arc::new(DynamicSlots::default()),
+            tls_clients: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -91,21 +93,18 @@ impl AppState {
         Ok(())
     }
 
-    pub fn client_for_account(&self, account: &Account) -> ApiResult<Client> {
-        if account.row.proxy_id.is_none() {
-            return Ok(self.client.clone());
-        }
+    pub async fn client_for_account(&self, account: &Account) -> ApiResult<Client> {
         if account.row.proxy_active != Some(true) {
+            if account.row.proxy_id.is_none() {
+                return crate::tls_fingerprint::client_for_account(self, account).await;
+            }
             return Err(ApiError::new(
                 http::StatusCode::SERVICE_UNAVAILABLE,
                 "PROXY_UNAVAILABLE",
                 "the account proxy is disabled or expired",
             ));
         }
-        match account.proxy_url.as_deref() {
-            Some(proxy_url) => build_http_client(Some(proxy_url)),
-            None => Ok(self.client.clone()),
-        }
+        crate::tls_fingerprint::client_for_account(self, account).await
     }
 
     pub async fn resolve_account(&self, mut row: AccountRow) -> ApiResult<Account> {
@@ -119,6 +118,7 @@ impl AppState {
             Option<String>,
             Option<bool>,
             Option<String>,
+            Option<i64>,
         )> = sqlx::query_as(
             "SELECT accounts.encrypted_credentials, accounts.base_url, accounts.proxy_id, \
              proxies.name, CASE WHEN proxies.id IS NULL THEN NULL WHEN proxies.enabled = 1 \
@@ -130,7 +130,8 @@ impl AppState {
              datetime(proxies.expires_at) > CURRENT_TIMESTAMP) THEN proxies.encrypted_url \
              WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
              (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > \
-             CURRENT_TIMESTAMP) THEN backup_proxies.encrypted_url ELSE NULL END \
+             CURRENT_TIMESTAMP) THEN backup_proxies.encrypted_url ELSE NULL END, \
+             accounts.tls_fingerprint_profile_id \
              FROM accounts LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
              LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
              WHERE accounts.id = ? AND accounts.kind = 'oauth' AND accounts.parent_account_id IS NULL",
@@ -138,7 +139,7 @@ impl AppState {
         .bind(parent_id)
         .fetch_optional(&self.pool)
         .await?;
-        let (credentials, base_url, proxy_id, proxy_name, proxy_active, proxy_url) =
+        let (credentials, base_url, proxy_id, proxy_name, proxy_active, proxy_url, tls_profile_id) =
             parent.ok_or_else(|| ApiError::not_found("Spark parent account not found"))?;
         row.encrypted_credentials = credentials;
         row.base_url = base_url;
@@ -146,6 +147,7 @@ impl AppState {
         row.proxy_name = proxy_name;
         row.proxy_active = proxy_active;
         row.encrypted_proxy_url = proxy_url;
+        row.tls_fingerprint_profile_id = tls_profile_id;
         row.decrypt(&self.crypto)
     }
 }
@@ -293,6 +295,17 @@ pub struct ScheduledAccount {
 }
 
 impl Scheduler {
+    pub async fn active_for(&self, account_id: i64, concurrency: i32) -> usize {
+        self.semaphores
+            .lock()
+            .await
+            .get(&account_id)
+            .map(|(_, semaphore)| {
+                (concurrency as usize).saturating_sub(semaphore.available_permits())
+            })
+            .unwrap_or_default()
+    }
+
     pub async fn select(
         &self,
         state: &AppState,
@@ -314,7 +327,8 @@ impl Scheduler {
              WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
              (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) \
              THEN backup_proxies.encrypted_url ELSE NULL END AS encrypted_proxy_url, \
-             accounts.parent_account_id, accounts.quota_dimension, \
+             accounts.parent_account_id, accounts.quota_dimension, accounts.notes, \
+             accounts.crs_account_id, accounts.tls_fingerprint_profile_id, \
              accounts.created_at, accounts.updated_at FROM accounts \
              LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
              LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \

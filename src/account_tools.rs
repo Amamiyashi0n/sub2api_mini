@@ -32,6 +32,8 @@ struct CloneAccountRow {
     priority: i32,
     concurrency: i32,
     proxy_id: Option<i64>,
+    notes: String,
+    tls_fingerprint_profile_id: Option<i64>,
     parent_account_id: Option<i64>,
 }
 
@@ -205,7 +207,7 @@ async fn stats(
 async fn duplicate(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
     let source = sqlx::query_as::<_, CloneAccountRow>(
         "SELECT name, kind, base_url, encrypted_credentials, priority, concurrency, proxy_id, \
-         parent_account_id \
+         notes, tls_fingerprint_profile_id, parent_account_id \
          FROM accounts WHERE id = ?",
     )
     .bind(id)
@@ -229,7 +231,7 @@ async fn duplicate(State(state): State<AppState>, Path(id): Path<i64>) -> ApiRes
     let mut transaction = state.pool.begin().await?;
     let duplicate_id = sqlx::query(
         "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, \
-         enabled, proxy_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+         enabled, proxy_id, notes, tls_fingerprint_profile_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
     )
     .bind(&name)
     .bind(&source.kind)
@@ -238,6 +240,8 @@ async fn duplicate(State(state): State<AppState>, Path(id): Path<i64>) -> ApiRes
     .bind(source.priority)
     .bind(source.concurrency)
     .bind(source.proxy_id)
+    .bind(&source.notes)
+    .bind(source.tls_fingerprint_profile_id)
     .execute(&mut *transaction)
     .await?
     .last_insert_rowid();

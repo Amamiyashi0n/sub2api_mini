@@ -311,7 +311,7 @@ async fn refresh_account_inner(
         )
     })?;
 
-    let client = state.client_for_account(account)?;
+    let client = state.client_for_account(account).await?;
     let response = client
         .post(OPENAI_TOKEN_URL)
         .form(&[
