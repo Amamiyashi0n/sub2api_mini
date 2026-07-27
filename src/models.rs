@@ -8,6 +8,7 @@ use crate::{
 
 pub const DEFAULT_API_BASE_URL: &str = "https://api.openai.com";
 pub const DEFAULT_OAUTH_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 
 pub fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
@@ -35,6 +36,14 @@ pub struct Credentials {
     pub chatgpt_account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org_uuid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -42,6 +51,8 @@ pub struct AccountRow {
     pub id: i64,
     pub name: String,
     pub kind: String,
+    pub platform: String,
+    pub account_type: String,
     pub base_url: String,
     pub encrypted_credentials: String,
     pub priority: i32,
@@ -95,6 +106,8 @@ impl AccountRow {
             id: self.id,
             name: self.name.clone(),
             kind: self.kind.clone(),
+            platform: self.platform.clone(),
+            account_type: self.account_type.clone(),
             base_url: self.base_url.clone(),
             priority: self.priority,
             concurrency: self.concurrency,
@@ -114,6 +127,8 @@ impl AccountRow {
             updated_at: self.updated_at.clone(),
             credential_hint: if self.parent_account_id.is_some() {
                 "Inherited OAuth token".into()
+            } else if self.account_type == "setup_token" {
+                "Setup Token".into()
             } else if self.kind == "oauth" {
                 "OAuth token".into()
             } else {
@@ -128,6 +143,8 @@ pub struct AccountPublic {
     pub id: i64,
     pub name: String,
     pub kind: String,
+    pub platform: String,
+    pub account_type: String,
     pub base_url: String,
     pub priority: i32,
     pub concurrency: i32,
@@ -237,6 +254,37 @@ pub fn normalize_base_url(value: &str, kind: &str) -> ApiResult<String> {
     url.set_query(None);
     url.set_fragment(None);
     Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+pub fn normalize_account_base_url(value: &str, kind: &str, platform: &str) -> ApiResult<String> {
+    let default = match platform {
+        "anthropic" => DEFAULT_ANTHROPIC_BASE_URL,
+        "openai" => {
+            if kind == "oauth" {
+                DEFAULT_OAUTH_BASE_URL
+            } else {
+                DEFAULT_API_BASE_URL
+            }
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_ACCOUNT_PLATFORM",
+                "platform must be openai or anthropic",
+            ));
+        }
+    };
+    normalize_base_url(
+        if value.trim().is_empty() {
+            default
+        } else {
+            value
+        },
+        if platform == "anthropic" {
+            "api_key"
+        } else {
+            kind
+        },
+    )
 }
 
 #[cfg(test)]

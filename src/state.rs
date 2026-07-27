@@ -27,6 +27,7 @@ pub struct AppState {
     pub client: Client,
     pub scheduler: Arc<Scheduler>,
     pub oauth_flows: Arc<Mutex<HashMap<String, OAuthFlow>>>,
+    pub claude_oauth_flows: Arc<Mutex<HashMap<String, ClaudeOAuthFlow>>>,
     pub oauth_refresh_locks: Arc<Mutex<HashMap<i64, Arc<Mutex<()>>>>>,
     pub model_cache: Arc<Mutex<HashMap<i64, CachedModels>>>,
     pub vertex_tokens: Arc<Mutex<HashMap<i64, CachedVertexToken>>>,
@@ -53,6 +54,7 @@ impl AppState {
             client,
             scheduler: Arc::new(Scheduler::default()),
             oauth_flows: Arc::new(Mutex::new(HashMap::new())),
+            claude_oauth_flows: Arc::new(Mutex::new(HashMap::new())),
             oauth_refresh_locks: Arc::new(Mutex::new(HashMap::new())),
             model_cache: Arc::new(Mutex::new(HashMap::new())),
             vertex_tokens: Arc::new(Mutex::new(HashMap::new())),
@@ -268,6 +270,20 @@ pub struct OAuthFlow {
     pub verifier: String,
     pub created_at: Instant,
     pub account_id: Option<i64>,
+    pub name: Option<String>,
+    pub priority: i32,
+    pub concurrency: i32,
+    pub proxy_id: Option<i64>,
+    pub notes: String,
+    pub tls_fingerprint_profile_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaudeOAuthFlow {
+    pub verifier: String,
+    pub state: String,
+    pub setup_token: bool,
+    pub created_at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -311,9 +327,11 @@ impl Scheduler {
         state: &AppState,
         excluded: &HashSet<i64>,
         group_id: Option<i64>,
+        platform: &str,
     ) -> ApiResult<ScheduledAccount> {
         let rows = sqlx::query_as::<_, AccountRow>(
-            "SELECT accounts.id, accounts.name, accounts.kind, accounts.base_url, \
+            "SELECT accounts.id, accounts.name, accounts.kind, accounts.platform, \
+             accounts.account_type, accounts.base_url, \
              accounts.encrypted_credentials, accounts.priority, accounts.concurrency, \
              accounts.enabled, accounts.cooldown_until, accounts.last_used_at, \
              accounts.last_error, accounts.proxy_id, proxies.name AS proxy_name, \
@@ -332,7 +350,7 @@ impl Scheduler {
              accounts.created_at, accounts.updated_at FROM accounts \
              LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
              LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
-             WHERE accounts.enabled = 1 AND (accounts.proxy_id IS NULL OR \
+             WHERE accounts.enabled = 1 AND accounts.platform = ? AND (accounts.proxy_id IS NULL OR \
              (proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
              datetime(proxies.expires_at) > CURRENT_TIMESTAMP)) OR proxies.fallback_mode = 'direct' OR \
              (proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
@@ -342,6 +360,7 @@ impl Scheduler {
              WHERE account_groups.account_id = accounts.id AND account_groups.group_id = ?)) \
              ORDER BY accounts.priority ASC, accounts.id ASC",
         )
+        .bind(platform)
         .bind(group_id)
         .bind(group_id)
         .fetch_all(&state.pool)

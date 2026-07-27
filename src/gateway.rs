@@ -32,6 +32,8 @@ enum Endpoint {
     Responses,
     ChatCompletions,
     Models,
+    Messages,
+    CountTokens,
 }
 
 impl Endpoint {
@@ -40,6 +42,8 @@ impl Endpoint {
             Self::Responses => "responses",
             Self::ChatCompletions => "chat/completions",
             Self::Models => "models",
+            Self::Messages => "messages",
+            Self::CountTokens => "messages/count_tokens",
         }
     }
 
@@ -48,6 +52,15 @@ impl Endpoint {
             Self::Responses => "/v1/responses",
             Self::ChatCompletions => "/v1/chat/completions",
             Self::Models => "/v1/models",
+            Self::Messages => "/v1/messages",
+            Self::CountTokens => "/v1/messages/count_tokens",
+        }
+    }
+
+    fn platform(self) -> &'static str {
+        match self {
+            Self::Messages | Self::CountTokens => "anthropic",
+            Self::Responses | Self::ChatCompletions | Self::Models => "openai",
         }
     }
 }
@@ -58,13 +71,16 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/models", get(models))
         .route("/responses", post(responses))
         .route("/chat/completions", post(chat_completions))
+        .route("/messages", post(messages))
+        .route("/messages/count_tokens", post(count_tokens))
         .route_layer(middleware::from_fn_with_state(state, api_key_guard))
 }
 
 pub async fn available_model_catalog(state: &AppState) -> ApiResult<Value> {
     let model_cache_seconds = state.runtime_settings.read().await.model_cache_seconds;
     let rows = sqlx::query_as::<_, AccountRow>(
-        "SELECT accounts.id, accounts.name, accounts.kind, accounts.base_url, \
+        "SELECT accounts.id, accounts.name, accounts.kind, accounts.platform, \
+         accounts.account_type, accounts.base_url, \
          accounts.encrypted_credentials, accounts.priority, accounts.concurrency, \
          accounts.enabled, accounts.cooldown_until, accounts.last_used_at, accounts.last_error, \
          accounts.proxy_id, proxies.name AS proxy_name, CASE WHEN proxies.id IS NULL THEN NULL \
@@ -173,7 +189,15 @@ pub(crate) async fn api_key_guard(
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| ApiError::unauthorized("Bearer API key is required"))?;
+        .or_else(|| {
+            request
+                .headers()
+                .get("x-api-key")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .ok_or_else(|| ApiError::unauthorized("Bearer API key or x-api-key header is required"))?;
     let hash = token_hash(token);
     let row = sqlx::query_as::<_, ApiKeyRow>(
         "SELECT id, user_id, name, token_prefix, token_hash, enabled, last_used_at, created_at, \
@@ -315,6 +339,24 @@ async fn chat_completions(
     proxy_json(state, key, headers, body, Endpoint::ChatCompletions).await
 }
 
+async fn messages(
+    State(state): State<AppState>,
+    Extension(key): Extension<ApiKeyContext>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    proxy_json(state, key, headers, body, Endpoint::Messages).await
+}
+
+async fn count_tokens(
+    State(state): State<AppState>,
+    Extension(key): Extension<ApiKeyContext>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    proxy_json(state, key, headers, body, Endpoint::CountTokens).await
+}
+
 async fn models(
     State(state): State<AppState>,
     Extension(key): Extension<ApiKeyContext>,
@@ -332,7 +374,7 @@ async fn models(
         upstream_attempts += 1;
         let mut scheduled = state
             .scheduler
-            .select(&state, &excluded, key.group_id)
+            .select(&state, &excluded, key.group_id, Endpoint::Models.platform())
             .await?;
         excluded.insert(scheduled.account.row.id);
 
@@ -565,7 +607,7 @@ async fn proxy_json(
         upstream_attempts += 1;
         let mut scheduled = state
             .scheduler
-            .select(&state, &excluded, key.group_id)
+            .select(&state, &excluded, key.group_id, endpoint.platform())
             .await?;
         excluded.insert(scheduled.account.row.id);
         if let Err(error) = oauth::refresh_if_needed(&state, &mut scheduled.account).await {
@@ -573,8 +615,9 @@ async fn proxy_json(
             continue;
         }
 
-        let convert_chat =
-            matches!(endpoint, Endpoint::ChatCompletions) && scheduled.account.row.kind == "oauth";
+        let convert_chat = matches!(endpoint, Endpoint::ChatCompletions)
+            && scheduled.account.row.platform == "openai"
+            && scheduled.account.row.kind == "oauth";
         let upstream_endpoint = if convert_chat {
             Endpoint::Responses
         } else {
@@ -939,6 +982,8 @@ async fn send_upstream(
         "accept",
         "content-type",
         "user-agent",
+        "anthropic-version",
+        "anthropic-beta",
         "openai-beta",
         "originator",
         "session_id",
@@ -949,7 +994,41 @@ async fn send_upstream(
         }
     }
     request = request.header(header::CONTENT_TYPE, "application/json");
-    if account.row.kind == "oauth" {
+    if account.row.platform == "anthropic" {
+        request = request.header(
+            "anthropic-version",
+            incoming_headers
+                .get("anthropic-version")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("2023-06-01"),
+        );
+        if account.row.kind == "oauth" {
+            let token = account.credentials.access_token.as_deref().ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "OAUTH_ACCESS_TOKEN_MISSING",
+                    "Claude OAuth access token is missing",
+                )
+            })?;
+            request = request
+                .bearer_auth(token)
+                .header("anthropic-beta", claude_oauth_beta(incoming_headers))
+                .header("user-agent", "claude-cli/2.1.161 (external, cli)")
+                .header("x-app", "cli")
+                .header("x-stainless-lang", "js")
+                .header("x-stainless-package-version", "0.94.0")
+                .header("anthropic-dangerous-direct-browser-access", "true");
+        } else {
+            let token = account.credentials.api_key.as_deref().ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "UPSTREAM_API_KEY_MISSING",
+                    "Anthropic API key is missing",
+                )
+            })?;
+            request = request.header("x-api-key", token);
+        }
+    } else if account.row.kind == "oauth" {
         let token = account.credentials.access_token.as_deref().ok_or_else(|| {
             ApiError::new(
                 StatusCode::BAD_GATEWAY,
@@ -980,7 +1059,13 @@ async fn send_upstream(
 
 fn upstream_url(account: &Account, endpoint: Endpoint) -> ApiResult<String> {
     let base = account.row.base_url.trim_end_matches('/');
-    let suffix = if account.row.kind == "oauth" {
+    let suffix = if account.row.platform == "anthropic" {
+        if base.ends_with("/v1") {
+            endpoint.path().to_string()
+        } else {
+            format!("v1/{}", endpoint.path())
+        }
+    } else if account.row.kind == "oauth" {
         endpoint.path().to_string()
     } else if base.ends_with("/v1") {
         endpoint.path().to_string()
@@ -994,6 +1079,28 @@ fn upstream_url(account: &Account, endpoint: Endpoint) -> ApiResult<String> {
     url::Url::parse(&url)
         .map(|url| url.to_string())
         .map_err(|_| ApiError::internal("stored upstream URL is invalid"))
+}
+
+fn claude_oauth_beta(headers: &HeaderMap) -> String {
+    const REQUIRED: [&str; 3] = [
+        "claude-code-20250219",
+        "oauth-2025-04-20",
+        "interleaved-thinking-2025-05-14",
+    ];
+    let incoming = headers
+        .get("anthropic-beta")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let mut values = Vec::new();
+    for value in REQUIRED
+        .into_iter()
+        .chain(incoming.split(',').map(str::trim))
+    {
+        if !value.is_empty() && !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    values.join(",")
 }
 
 pub async fn probe_account(state: &AppState, account: &mut Account) -> ApiResult<Value> {
@@ -1020,22 +1127,31 @@ pub async fn probe_account_model(
     model: &str,
 ) -> ApiResult<Value> {
     oauth::refresh_if_needed(state, account).await?;
-    let body = serde_json::to_vec(&json!({
-        "model": model,
-        "input": "Reply exactly with OK.",
-        "max_output_tokens": 16,
-        "store": false,
-        "stream": false
-    }))
-    .map_err(|_| ApiError::internal("account test serialization failed"))?;
-    let response = send_upstream(
-        state,
-        account,
-        Endpoint::Responses,
-        &HeaderMap::new(),
-        Some(body),
-    )
-    .await?;
+    let (endpoint, payload) = if account.row.platform == "anthropic" {
+        (
+            Endpoint::Messages,
+            json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "Reply exactly with OK."}],
+                "max_tokens": 16,
+                "stream": false
+            }),
+        )
+    } else {
+        (
+            Endpoint::Responses,
+            json!({
+                "model": model,
+                "input": "Reply exactly with OK.",
+                "max_output_tokens": 16,
+                "store": false,
+                "stream": false
+            }),
+        )
+    };
+    let body = serde_json::to_vec(&payload)
+        .map_err(|_| ApiError::internal("account test serialization failed"))?;
+    let response = send_upstream(state, account, endpoint, &HeaderMap::new(), Some(body)).await?;
     let status = response.status();
     if !status.is_success() {
         return Err(ApiError::new(
@@ -2130,6 +2246,19 @@ mod tests {
     }
 
     #[test]
+    fn claude_oauth_beta_keeps_required_values_and_deduplicates_client_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "anthropic-beta",
+            HeaderValue::from_static("custom-beta,oauth-2025-04-20"),
+        );
+        assert_eq!(
+            claude_oauth_beta(&headers),
+            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,custom-beta"
+        );
+    }
+
+    #[test]
     fn rejects_unsupported_chat_parameters() {
         assert!(chat_to_responses(&json!({"messages":[],"n":2})).is_err());
     }
@@ -2185,6 +2314,93 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(logged_account, second_id);
+    }
+
+    #[tokio::test]
+    async fn messages_routes_only_to_anthropic_and_accepts_downstream_x_api_key() {
+        async fn anthropic_handler(
+            headers: HeaderMap,
+            Json(body): Json<Value>,
+        ) -> impl IntoResponse {
+            assert_eq!(
+                headers
+                    .get("x-api-key")
+                    .and_then(|value| value.to_str().ok()),
+                Some("anthropic-secret")
+            );
+            assert_eq!(
+                headers
+                    .get("anthropic-version")
+                    .and_then(|value| value.to_str().ok()),
+                Some("2023-06-01")
+            );
+            assert!(headers.get(header::AUTHORIZATION).is_none());
+            assert_eq!(body["model"], "claude-test");
+            Json(json!({
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-test",
+                "content": [{"type": "text", "text": "hello"}],
+                "usage": {"input_tokens": 3, "output_tokens": 1}
+            }))
+        }
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route("/v1/messages", post(anthropic_handler)),
+            )
+            .await
+            .unwrap();
+        });
+        let (_directory, state) = test_state().await;
+        let credentials = state
+            .crypto
+            .encrypt(br#"{"api_key":"anthropic-secret"}"#)
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (name, kind, platform, account_type, base_url, \
+             encrypted_credentials) VALUES ('claude', 'api_key', 'anthropic', 'api_key', ?, ?)",
+        )
+        .bind(format!("http://{address}"))
+        .bind(credentials)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let downstream = "sk-mini-anthropic-test";
+        sqlx::query(
+            "INSERT INTO api_keys (name, token_prefix, token_hash) VALUES ('claude', 'sk-mini-ant', ?)",
+        )
+        .bind(token_hash(downstream))
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        let app = Router::new()
+            .nest("/v1", router(state.clone()))
+            .with_state(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/messages")
+                    .header("content-type", "application/json")
+                    .header("x-api-key", downstream)
+                    .body(Body::from(
+                        json!({"model":"claude-test","max_tokens":16,"messages":[]}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["id"],
+            "msg_1"
+        );
     }
 
     #[tokio::test]

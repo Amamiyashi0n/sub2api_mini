@@ -27,6 +27,8 @@ pub fn admin_router() -> Router<AppState> {
 struct CloneAccountRow {
     name: String,
     kind: String,
+    platform: String,
+    account_type: String,
     base_url: String,
     encrypted_credentials: String,
     priority: i32,
@@ -206,7 +208,8 @@ async fn stats(
 
 async fn duplicate(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<Json<Value>> {
     let source = sqlx::query_as::<_, CloneAccountRow>(
-        "SELECT name, kind, base_url, encrypted_credentials, priority, concurrency, proxy_id, \
+        "SELECT name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, proxy_id, \
          notes, tls_fingerprint_profile_id, parent_account_id \
          FROM accounts WHERE id = ?",
     )
@@ -230,11 +233,14 @@ async fn duplicate(State(state): State<AppState>, Path(id): Path<i64>) -> ApiRes
     let name = duplicate_name(&state, &source.name).await?;
     let mut transaction = state.pool.begin().await?;
     let duplicate_id = sqlx::query(
-        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, \
-         enabled, proxy_id, notes, tls_fingerprint_profile_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+        "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, enabled, proxy_id, notes, tls_fingerprint_profile_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
     )
     .bind(&name)
     .bind(&source.kind)
+    .bind(&source.platform)
+    .bind(&source.account_type)
     .bind(&source.base_url)
     .bind(encrypted)
     .bind(source.priority)
@@ -265,15 +271,15 @@ async fn create_spark_shadow(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Value>> {
-    let parent = sqlx::query_as::<_, (String, String, String, i32, i32, Option<i64>, Option<i64>)>(
-        "SELECT name, kind, base_url, priority, concurrency, proxy_id, parent_account_id \
+    let parent = sqlx::query_as::<_, (String, String, String, String, String, i32, i32, Option<i64>, Option<i64>)>(
+        "SELECT name, kind, platform, account_type, base_url, priority, concurrency, proxy_id, parent_account_id \
          FROM accounts WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| ApiError::not_found("account not found"))?;
-    if parent.1 != "oauth" || parent.6.is_some() {
+    if parent.1 != "oauth" || parent.2 != "openai" || parent.8.is_some() {
         return Err(ApiError::bad_request(
             "SPARK_PARENT_REQUIRED",
             "Spark shadows require a top-level OAuth account",
@@ -297,16 +303,16 @@ async fn create_spark_shadow(
     )?;
     let mut transaction = state.pool.begin().await?;
     let shadow_id = sqlx::query(
-        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, \
-         enabled, proxy_id, parent_account_id, quota_dimension) \
-         VALUES (?, 'oauth', ?, ?, ?, ?, 0, ?, ?, 'spark')",
+        "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, enabled, proxy_id, parent_account_id, quota_dimension) \
+         VALUES (?, 'oauth', 'openai', 'oauth', ?, ?, ?, ?, 0, ?, ?, 'spark')",
     )
     .bind(&name)
-    .bind(&parent.2)
+    .bind(&parent.4)
     .bind(placeholder)
-    .bind(parent.3)
-    .bind(parent.4)
     .bind(parent.5)
+    .bind(parent.6)
+    .bind(parent.7)
     .bind(id)
     .execute(&mut *transaction)
     .await
@@ -331,8 +337,8 @@ async fn create_spark_shadow(
     transaction.commit().await?;
     Ok(Json(json!({"data": {"id": shadow_id, "name": name,
         "kind": "oauth", "parent_account_id": id, "quota_dimension": "spark",
-        "enabled": false, "priority": parent.3, "concurrency": parent.4,
-        "proxy_id": parent.5}})))
+        "enabled": false, "priority": parent.5, "concurrency": parent.6,
+        "proxy_id": parent.7}})))
 }
 
 async fn reauth(
@@ -340,12 +346,12 @@ async fn reauth(
     Path(id): Path<i64>,
     Json(input): Json<ReauthInput>,
 ) -> ApiResult<Json<Value>> {
-    let row: Option<(String, String, Option<i64>)> =
-        sqlx::query_as("SELECT name, kind, parent_account_id FROM accounts WHERE id = ?")
+    let row: Option<(String, String, String, Option<i64>)> =
+        sqlx::query_as("SELECT name, kind, platform, parent_account_id FROM accounts WHERE id = ?")
             .bind(id)
             .fetch_optional(&state.pool)
             .await?;
-    let (name, kind, parent_account_id) =
+    let (name, kind, platform, parent_account_id) =
         row.ok_or_else(|| ApiError::not_found("account not found"))?;
     if parent_account_id.is_some() {
         return Err(ApiError::bad_request(
@@ -353,7 +359,7 @@ async fn reauth(
             "Spark shadow credentials are inherited from the parent account",
         ));
     }
-    if kind != "oauth" {
+    if kind != "oauth" || platform != "openai" {
         return Err(ApiError::bad_request(
             "NOT_OAUTH_ACCOUNT",
             "only OAuth accounts can be re-authorized",

@@ -44,7 +44,21 @@ pub struct OAuthComplete {
     pub reauthorized: bool,
 }
 
-pub async fn start_flow(state: &AppState, account_id: Option<i64>) -> ApiResult<OAuthStart> {
+#[derive(Debug, Default)]
+pub struct OAuthAccountOptions {
+    pub name: Option<String>,
+    pub priority: i32,
+    pub concurrency: i32,
+    pub proxy_id: Option<i64>,
+    pub notes: String,
+    pub tls_fingerprint_profile_id: Option<i64>,
+}
+
+pub async fn start_flow_with_options(
+    state: &AppState,
+    account_id: Option<i64>,
+    options: OAuthAccountOptions,
+) -> ApiResult<OAuthStart> {
     let flow_state = random_token(32)?;
     let verifier = random_token(64)?;
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
@@ -70,6 +84,12 @@ pub async fn start_flow(state: &AppState, account_id: Option<i64>) -> ApiResult<
             verifier,
             created_at: Instant::now(),
             account_id,
+            name: options.name,
+            priority: options.priority,
+            concurrency: options.concurrency,
+            proxy_id: options.proxy_id,
+            notes: options.notes,
+            tls_fingerprint_profile_id: options.tls_fingerprint_profile_id,
         },
     );
 
@@ -120,7 +140,33 @@ pub async fn complete_flow(
         ));
     }
     let token: TokenResponse = token.json().await?;
-    persist_completed_flow(state, token, flow.account_id).await
+    let completed = persist_completed_flow(state, token, flow.account_id).await?;
+    if flow.account_id.is_none() {
+        let name = flow
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        sqlx::query(
+            "UPDATE accounts SET name = COALESCE(?, name), priority = ?, concurrency = ?, \
+             proxy_id = ?, notes = ?, tls_fingerprint_profile_id = ?, \
+             updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        )
+        .bind(name)
+        .bind(if flow.priority < 0 { 50 } else { flow.priority })
+        .bind(if flow.concurrency < 1 {
+            3
+        } else {
+            flow.concurrency
+        })
+        .bind(flow.proxy_id)
+        .bind(flow.notes.trim())
+        .bind(flow.tls_fingerprint_profile_id)
+        .bind(completed.account_id)
+        .execute(&state.pool)
+        .await?;
+    }
+    Ok(completed)
 }
 
 async fn persist_completed_flow(
@@ -151,13 +197,13 @@ async fn replace_oauth_credentials(
     account_id: i64,
     mut credentials: Credentials,
 ) -> ApiResult<()> {
-    let stored: Option<(String, String)> =
-        sqlx::query_as("SELECT kind, encrypted_credentials FROM accounts WHERE id = ?")
+    let stored: Option<(String, String, String)> =
+        sqlx::query_as("SELECT kind, platform, encrypted_credentials FROM accounts WHERE id = ?")
             .bind(account_id)
             .fetch_optional(&state.pool)
             .await?;
     let encrypted_current = match stored {
-        Some((kind, encrypted)) if kind == "oauth" => encrypted,
+        Some((kind, platform, encrypted)) if kind == "oauth" && platform == "openai" => encrypted,
         Some(_) => {
             return Err(ApiError::bad_request(
                 "NOT_OAUTH_ACCOUNT",
@@ -243,8 +289,8 @@ pub async fn insert_oauth_account(
             .map_err(|_| ApiError::internal("credential serialization failed"))?,
     )?;
     let result = sqlx::query(
-        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency) \
-         VALUES (?, 'oauth', ?, ?, ?, ?)",
+        "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency) VALUES (?, 'oauth', 'openai', 'oauth', ?, ?, ?, ?)",
     )
     .bind(name.trim())
     .bind(DEFAULT_OAUTH_BASE_URL)
@@ -260,6 +306,9 @@ pub async fn refresh_if_needed(state: &AppState, account: &mut Account) -> ApiRe
     if account.row.kind != "oauth" {
         return Ok(());
     }
+    if account.row.platform == "anthropic" {
+        return crate::claude_oauth::refresh_if_needed(state, account).await;
+    }
     let expires_at = account.credentials.expires_at.unwrap_or(0);
     if expires_at > Utc::now().timestamp() + 300 {
         return Ok(());
@@ -268,10 +317,16 @@ pub async fn refresh_if_needed(state: &AppState, account: &mut Account) -> ApiRe
 }
 
 pub async fn refresh_account(state: &AppState, account: &mut Account) -> ApiResult<()> {
+    if account.row.platform == "anthropic" {
+        return crate::claude_oauth::refresh_account(state, account, false).await;
+    }
     refresh_account_inner(state, account, false).await
 }
 
 pub async fn refresh_account_forced(state: &AppState, account: &mut Account) -> ApiResult<()> {
+    if account.row.platform == "anthropic" {
+        return crate::claude_oauth::refresh_account(state, account, true).await;
+    }
     refresh_account_inner(state, account, true).await
 }
 
@@ -467,7 +522,10 @@ mod tests {
         .await
         .unwrap();
 
-        let started = start_flow(&state, Some(account_id)).await.unwrap();
+        let started =
+            start_flow_with_options(&state, Some(account_id), OAuthAccountOptions::default())
+                .await
+                .unwrap();
         let url = url::Url::parse(&started.auth_url).unwrap();
         let flow_state = url
             .query_pairs()

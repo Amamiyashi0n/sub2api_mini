@@ -13,7 +13,7 @@ use crate::{
     crypto::token_hash,
     error::{ApiError, ApiResult},
     gateway, key_policy,
-    models::{AccountRow, Credentials, normalize_base_url},
+    models::{AccountRow, Credentials, normalize_account_base_url},
     oauth,
     state::{AppState, RuntimeSettings},
 };
@@ -39,6 +39,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/accounts/{id}/recover", post(recover_account))
         .route("/oauth/import", post(import_oauth))
         .route("/oauth/start", post(start_oauth))
+        .route("/claude/oauth/start", post(start_claude_oauth))
+        .route("/claude/oauth/exchange", post(exchange_claude_oauth))
         .route("/keys", get(list_keys).post(create_key))
         .route("/keys/batch", post(batch_key_action))
         .route("/keys/{id}", put(update_key).delete(delete_key))
@@ -361,7 +363,8 @@ fn valid_site_logo(value: &str) -> bool {
 
 async fn list_accounts(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     let rows = sqlx::query_as::<_, AccountRow>(
-        "SELECT accounts.id, accounts.name, accounts.kind, accounts.base_url, \
+        "SELECT accounts.id, accounts.name, accounts.kind, accounts.platform, \
+         accounts.account_type, accounts.base_url, \
          accounts.encrypted_credentials, accounts.priority, accounts.concurrency, \
          accounts.enabled, accounts.cooldown_until, accounts.last_used_at, accounts.last_error, \
          accounts.proxy_id, proxies.name AS proxy_name, CASE WHEN proxies.id IS NULL THEN NULL \
@@ -433,6 +436,10 @@ struct CreateAccountInput {
     name: String,
     #[serde(default = "default_api_key_kind")]
     kind: String,
+    #[serde(default = "default_openai_platform")]
+    platform: String,
+    #[serde(default = "default_api_key_type")]
+    account_type: String,
     #[serde(default)]
     base_url: String,
     api_key: String,
@@ -451,6 +458,12 @@ struct CreateAccountInput {
 fn default_api_key_kind() -> String {
     "api_key".into()
 }
+fn default_openai_platform() -> String {
+    "openai".into()
+}
+fn default_api_key_type() -> String {
+    "api_key".into()
+}
 fn default_priority() -> i32 {
     50
 }
@@ -462,7 +475,7 @@ async fn create_account(
     State(state): State<AppState>,
     Json(input): Json<CreateAccountInput>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    if input.kind != "api_key" {
+    if input.kind != "api_key" || input.account_type != "api_key" {
         return Err(ApiError::bad_request(
             "INVALID_ACCOUNT_KIND",
             "OAuth accounts must be created through OAuth import or PKCE",
@@ -475,7 +488,13 @@ async fn create_account(
             "api_key is required",
         ));
     }
-    let base_url = normalize_base_url(&input.base_url, "api_key")?;
+    if !matches!(input.platform.as_str(), "openai" | "anthropic") {
+        return Err(ApiError::bad_request(
+            "INVALID_ACCOUNT_PLATFORM",
+            "platform must be openai or anthropic",
+        ));
+    }
+    let base_url = normalize_account_base_url(&input.base_url, "api_key", &input.platform)?;
     validate_proxy_id(&state, input.proxy_id).await?;
     validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
     validate_notes(&input.notes)?;
@@ -485,10 +504,12 @@ async fn create_account(
     };
     let encrypted = encrypt_credentials(&state, &credentials)?;
     let result = sqlx::query(
-        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, \
-         proxy_id, notes, tls_fingerprint_profile_id) VALUES (?, 'api_key', ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, proxy_id, notes, tls_fingerprint_profile_id) \
+         VALUES (?, 'api_key', ?, 'api_key', ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(input.name.trim())
+    .bind(&input.platform)
     .bind(base_url)
     .bind(encrypted)
     .bind(input.priority)
@@ -567,7 +588,7 @@ async fn update_account(
     validate_account_fields(&name, priority, concurrency)?;
     validate_notes(&notes)?;
     let base_url = match input.base_url {
-        Some(value) => normalize_base_url(&value, &row.kind)?,
+        Some(value) => normalize_account_base_url(&value, &row.kind, &row.platform)?,
         None => row.base_url.clone(),
     };
     let mut account = state.resolve_account(row.clone()).await?;
@@ -1050,8 +1071,103 @@ async fn import_oauth(
 }
 
 #[derive(Debug, Deserialize, Default)]
+struct ClaudeOAuthStartInput {
+    #[serde(default)]
+    setup_token: bool,
+}
+
+async fn start_claude_oauth(
+    State(state): State<AppState>,
+    Json(input): Json<ClaudeOAuthStartInput>,
+) -> ApiResult<Json<Value>> {
+    let result = crate::claude_oauth::start_flow(&state, input.setup_token).await?;
+    Ok(Json(json!({"data": result})))
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaudeOAuthExchangeInput {
+    session_id: String,
+    code: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default = "default_priority")]
+    priority: i32,
+    #[serde(default = "default_concurrency")]
+    concurrency: i32,
+    #[serde(default)]
+    proxy_id: Option<i64>,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    tls_fingerprint_profile_id: Option<i64>,
+}
+
+async fn exchange_claude_oauth(
+    State(state): State<AppState>,
+    Json(input): Json<ClaudeOAuthExchangeInput>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    validate_account_fields(
+        if input.name.trim().is_empty() {
+            "Claude OAuth"
+        } else {
+            &input.name
+        },
+        input.priority,
+        input.concurrency,
+    )?;
+    validate_proxy_id(&state, input.proxy_id).await?;
+    validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
+    validate_notes(&input.notes)?;
+    let exchanged =
+        crate::claude_oauth::exchange_code(&state, &input.session_id, &input.code).await?;
+    let name = if input.name.trim().is_empty() {
+        exchanged
+            .credentials
+            .email
+            .clone()
+            .unwrap_or_else(|| "Claude OAuth".into())
+    } else {
+        input.name.trim().to_string()
+    };
+    let encrypted = encrypt_credentials(&state, &exchanged.credentials)?;
+    let base_url = normalize_account_base_url("", "oauth", "anthropic")?;
+    let result = sqlx::query(
+        "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, proxy_id, notes, tls_fingerprint_profile_id) \
+         VALUES (?, 'oauth', 'anthropic', ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(name)
+    .bind(exchanged.account_type)
+    .bind(base_url)
+    .bind(encrypted)
+    .bind(input.priority)
+    .bind(input.concurrency)
+    .bind(input.proxy_id)
+    .bind(input.notes.trim())
+    .bind(input.tls_fingerprint_profile_id)
+    .execute(&state.pool)
+    .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"data": {"id": result.last_insert_rowid()}})),
+    ))
+}
+
+#[derive(Debug, Deserialize, Default)]
 struct OAuthStartInput {
     account_id: Option<i64>,
+    #[serde(default)]
+    name: String,
+    #[serde(default = "default_priority")]
+    priority: i32,
+    #[serde(default = "default_concurrency")]
+    concurrency: i32,
+    #[serde(default)]
+    proxy_id: Option<i64>,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    tls_fingerprint_profile_id: Option<i64>,
 }
 
 async fn start_oauth(
@@ -1060,14 +1176,43 @@ async fn start_oauth(
 ) -> ApiResult<Json<Value>> {
     if let Some(account_id) = input.account_id {
         let account = get_account_row(&state, account_id).await?;
-        if account.kind != "oauth" || account.parent_account_id.is_some() {
+        if account.kind != "oauth"
+            || account.platform != "openai"
+            || account.parent_account_id.is_some()
+        {
             return Err(ApiError::bad_request(
                 "NOT_OAUTH_ACCOUNT",
                 "only OAuth accounts can be re-authorized",
             ));
         }
     }
-    let started = oauth::start_flow(&state, input.account_id).await?;
+    if input.account_id.is_none() {
+        validate_account_fields(
+            if input.name.trim().is_empty() {
+                "OpenAI OAuth"
+            } else {
+                &input.name
+            },
+            input.priority,
+            input.concurrency,
+        )?;
+        validate_proxy_id(&state, input.proxy_id).await?;
+        validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
+        validate_notes(&input.notes)?;
+    }
+    let started = oauth::start_flow_with_options(
+        &state,
+        input.account_id,
+        oauth::OAuthAccountOptions {
+            name: (!input.name.trim().is_empty()).then(|| input.name.trim().to_string()),
+            priority: input.priority,
+            concurrency: input.concurrency,
+            proxy_id: input.proxy_id,
+            notes: input.notes,
+            tls_fingerprint_profile_id: input.tls_fingerprint_profile_id,
+        },
+    )
+    .await?;
     Ok(Json(json!({"data": started})))
 }
 
@@ -1391,7 +1536,8 @@ async fn delete_key(State(state): State<AppState>, Path(id): Path<i64>) -> ApiRe
 
 pub(crate) async fn get_account_row(state: &AppState, id: i64) -> ApiResult<AccountRow> {
     sqlx::query_as::<_, AccountRow>(
-        "SELECT accounts.id, accounts.name, accounts.kind, accounts.base_url, \
+        "SELECT accounts.id, accounts.name, accounts.kind, accounts.platform, \
+         accounts.account_type, accounts.base_url, \
          accounts.encrypted_credentials, accounts.priority, accounts.concurrency, \
          accounts.enabled, accounts.cooldown_until, accounts.last_used_at, accounts.last_error, \
          accounts.proxy_id, proxies.name AS proxy_name, CASE WHEN proxies.id IS NULL THEN NULL \

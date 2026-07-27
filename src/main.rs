@@ -7,6 +7,7 @@ mod auth;
 mod batch_images;
 mod channel_monitor;
 mod channels;
+mod claude_oauth;
 mod config;
 mod content;
 mod crs_sync;

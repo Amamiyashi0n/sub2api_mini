@@ -985,7 +985,7 @@ mod tests {
 
         let selected = state
             .scheduler
-            .select(&state, &HashSet::new(), None)
+            .select(&state, &HashSet::new(), None, "openai")
             .await
             .unwrap();
         assert_eq!(
@@ -999,7 +999,11 @@ mod tests {
             .execute(&state.pool)
             .await
             .unwrap();
-        let error = match state.scheduler.select(&state, &HashSet::new(), None).await {
+        let error = match state
+            .scheduler
+            .select(&state, &HashSet::new(), None, "openai")
+            .await
+        {
             Ok(_) => panic!("disabled proxy account was scheduled"),
             Err(error) => error,
         };
@@ -1041,7 +1045,7 @@ mod tests {
 
         let selected = state
             .scheduler
-            .select(&state, &HashSet::new(), None)
+            .select(&state, &HashSet::new(), None, "openai")
             .await
             .unwrap();
         assert_eq!(
@@ -1059,7 +1063,7 @@ mod tests {
         .unwrap();
         let selected = state
             .scheduler
-            .select(&state, &HashSet::new(), None)
+            .select(&state, &HashSet::new(), None, "openai")
             .await
             .unwrap();
         assert!(selected.account.proxy_url.is_none());

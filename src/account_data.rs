@@ -12,9 +12,12 @@ use sqlx::FromRow;
 
 use crate::{
     error::{ApiError, ApiResult},
-    models::{Credentials, DEFAULT_OAUTH_BASE_URL, normalize_base_url},
+    models::{Credentials, normalize_account_base_url},
     state::AppState,
 };
+
+#[cfg(test)]
+use crate::models::DEFAULT_OAUTH_BASE_URL;
 
 const DATA_TYPE: &str = "sub2api-data";
 const LEGACY_DATA_TYPE: &str = "sub2api-bundle";
@@ -119,7 +122,8 @@ struct ImportError {
 struct AccountBackupRow {
     id: i64,
     name: String,
-    kind: String,
+    platform: String,
+    account_type: String,
     base_url: String,
     encrypted_credentials: String,
     priority: i32,
@@ -203,7 +207,8 @@ async fn export_data(
             .fetch_one(&state.pool)
             .await?;
     let rows = sqlx::query_as::<_, AccountBackupRow>(
-        "SELECT id, name, kind, base_url, encrypted_credentials, priority, concurrency, enabled, \
+        "SELECT id, name, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, enabled, \
          proxy_id FROM accounts WHERE parent_account_id IS NULL ORDER BY id ASC",
     )
     .fetch_all(&state.pool)
@@ -230,13 +235,12 @@ async fn export_data(
         extra.insert("mini_enabled".into(), Value::Bool(row.enabled));
         accounts.push(DataAccount {
             name: row.name,
-            platform: "openai".into(),
-            account_type: if row.kind == "oauth" {
-                "oauth"
-            } else {
-                "apikey"
-            }
-            .into(),
+            platform: row.platform,
+            account_type: match row.account_type.as_str() {
+                "api_key" => "apikey".into(),
+                "setup_token" => "setup-token".into(),
+                value => value.into(),
+            },
             credentials: credential_map,
             extra,
             proxy_key: row.proxy_id.and_then(|id| proxy_keys.get(&id).cloned()),
@@ -498,7 +502,9 @@ async fn import_account(
         .get("base_url")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let kind = match item.account_type.trim().to_ascii_lowercase().as_str() {
+    let platform = item.platform.trim().to_ascii_lowercase();
+    let account_type = item.account_type.trim().to_ascii_lowercase();
+    let (kind, stored_account_type) = match account_type.as_str() {
         "apikey" | "api_key" => {
             if credentials
                 .api_key
@@ -511,9 +517,9 @@ async fn import_account(
                 ));
             }
             credentials.api_key = credentials.api_key.map(|value| value.trim().to_string());
-            "api_key"
+            ("api_key", "api_key")
         }
-        "oauth" => {
+        "oauth" | "setup-token" | "setup_token" => {
             let no_access = credentials
                 .access_token
                 .as_deref()
@@ -528,30 +534,35 @@ async fn import_account(
                     "credentials must contain access_token or refresh_token",
                 ));
             }
-            "oauth"
+            (
+                "oauth",
+                if account_type.starts_with("setup") {
+                    "setup_token"
+                } else {
+                    "oauth"
+                },
+            )
         }
         value => {
             return Err(ApiError::bad_request(
                 "UNSUPPORTED_ACCOUNT_TYPE",
-                format!("OpenAI account type '{value}' is not supported"),
+                format!("account type '{value}' is not supported"),
             ));
         }
     };
-    let base_url = if kind == "oauth" {
-        DEFAULT_OAUTH_BASE_URL.to_string()
-    } else {
-        normalize_base_url(base_url, kind)?
-    };
+    let base_url = normalize_account_base_url(base_url, kind, &platform)?;
     let encrypted = state.crypto.encrypt(
         &serde_json::to_vec(&credentials)
             .map_err(|_| ApiError::internal("credential serialization failed"))?,
     )?;
     sqlx::query(
-        "INSERT INTO accounts (name, kind, base_url, encrypted_credentials, priority, concurrency, \
-         enabled, proxy_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
+         priority, concurrency, enabled, proxy_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(item.name.trim())
     .bind(kind)
+    .bind(platform)
+    .bind(stored_account_type)
     .bind(base_url)
     .bind(encrypted)
     .bind(item.priority)
@@ -604,7 +615,10 @@ fn validate_account(item: &DataAccount) -> ApiResult<()> {
             "account name must contain 1 to 120 characters",
         ));
     }
-    if !item.platform.trim().eq_ignore_ascii_case("openai") {
+    if !matches!(
+        item.platform.trim().to_ascii_lowercase().as_str(),
+        "openai" | "anthropic"
+    ) {
         return Err(ApiError::bad_request(
             "UNSUPPORTED_ACCOUNT_PLATFORM",
             format!(
@@ -823,8 +837,8 @@ mod tests {
         let (_directory, state) = test_support::state().await;
         let mut payload = sample_payload();
         let mut invalid = payload.accounts[0].clone();
-        invalid.name = "Claude".into();
-        invalid.platform = "anthropic".into();
+        invalid.name = "Gemini".into();
+        invalid.platform = "gemini".into();
         payload.accounts.push(invalid);
         let Json(value) = import_data(State(state.clone()), Json(ImportRequest { data: payload }))
             .await
