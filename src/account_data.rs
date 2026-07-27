@@ -11,6 +11,9 @@ use serde_json::{Map, Value, json};
 use sqlx::FromRow;
 
 use crate::{
+    admin::{
+        normalize_provider_account_type, provider_default_base_url, validate_provider_credentials,
+    },
     error::{ApiError, ApiResult},
     models::{Credentials, normalize_account_base_url},
     state::AppState,
@@ -497,60 +500,26 @@ async fn import_account(
     let mut credentials: Credentials =
         serde_json::from_value(Value::Object(item.credentials.clone()))
             .map_err(|_| ApiError::bad_request("INVALID_CREDENTIALS", "credentials are invalid"))?;
+    credentials.provider.remove("base_url");
     let base_url = item
         .credentials
         .get("base_url")
         .and_then(Value::as_str)
         .unwrap_or_default();
     let platform = item.platform.trim().to_ascii_lowercase();
-    let account_type = item.account_type.trim().to_ascii_lowercase();
-    let (kind, stored_account_type) = match account_type.as_str() {
-        "apikey" | "api_key" => {
-            if credentials
-                .api_key
-                .as_deref()
-                .is_none_or(|value| value.trim().is_empty())
-            {
-                return Err(ApiError::bad_request(
-                    "API_KEY_REQUIRED",
-                    "credentials.api_key is required",
-                ));
-            }
-            credentials.api_key = credentials.api_key.map(|value| value.trim().to_string());
-            ("api_key", "api_key")
-        }
-        "oauth" | "setup-token" | "setup_token" => {
-            let no_access = credentials
-                .access_token
-                .as_deref()
-                .is_none_or(|value| value.trim().is_empty());
-            let no_refresh = credentials
-                .refresh_token
-                .as_deref()
-                .is_none_or(|value| value.trim().is_empty());
-            if no_access && no_refresh {
-                return Err(ApiError::bad_request(
-                    "OAUTH_TOKEN_REQUIRED",
-                    "credentials must contain access_token or refresh_token",
-                ));
-            }
-            (
-                "oauth",
-                if account_type.starts_with("setup") {
-                    "setup_token"
-                } else {
-                    "oauth"
-                },
-            )
-        }
-        value => {
-            return Err(ApiError::bad_request(
-                "UNSUPPORTED_ACCOUNT_TYPE",
-                format!("account type '{value}' is not supported"),
-            ));
-        }
-    };
-    let base_url = normalize_account_base_url(base_url, kind, &platform)?;
+    let (kind, stored_account_type) =
+        normalize_provider_account_type(&platform, &item.account_type)?;
+    validate_provider_credentials(&platform, stored_account_type, &mut credentials)?;
+    let default_base = provider_default_base_url(&platform, stored_account_type, &credentials)?;
+    let base_url = normalize_account_base_url(
+        if base_url.trim().is_empty() {
+            &default_base
+        } else {
+            base_url
+        },
+        kind,
+        &platform,
+    )?;
     let encrypted = state.crypto.encrypt(
         &serde_json::to_vec(&credentials)
             .map_err(|_| ApiError::internal("credential serialization failed"))?,
@@ -617,7 +586,7 @@ fn validate_account(item: &DataAccount) -> ApiResult<()> {
     }
     if !matches!(
         item.platform.trim().to_ascii_lowercase().as_str(),
-        "openai" | "anthropic"
+        "openai" | "anthropic" | "gemini" | "antigravity" | "grok"
     ) {
         return Err(ApiError::bad_request(
             "UNSUPPORTED_ACCOUNT_PLATFORM",
@@ -837,8 +806,8 @@ mod tests {
         let (_directory, state) = test_support::state().await;
         let mut payload = sample_payload();
         let mut invalid = payload.accounts[0].clone();
-        invalid.name = "Gemini".into();
-        invalid.platform = "gemini".into();
+        invalid.name = "Unsupported".into();
+        invalid.platform = "cohere".into();
         payload.accounts.push(invalid);
         let Json(value) = import_data(State(state.clone()), Json(ImportRequest { data: payload }))
             .await

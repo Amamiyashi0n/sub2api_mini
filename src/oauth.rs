@@ -20,6 +20,13 @@ pub const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const OPENAI_AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 pub const OPENAI_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 pub const OPENAI_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const GROK_TOKEN_URL: &str = "https://auth.x.ai/oauth2/token";
+const GEMINI_CLIENT_ID_ENV: &str = "SUB2API_MINI_GEMINI_OAUTH_CLIENT_ID";
+const GEMINI_CLIENT_SECRET_ENV: &str = "SUB2API_MINI_GEMINI_OAUTH_CLIENT_SECRET";
+const ANTIGRAVITY_CLIENT_ID_ENV: &str = "SUB2API_MINI_ANTIGRAVITY_OAUTH_CLIENT_ID";
+const ANTIGRAVITY_CLIENT_SECRET_ENV: &str = "SUB2API_MINI_ANTIGRAVITY_OAUTH_CLIENT_SECRET";
+const GROK_CLIENT_ID_ENV: &str = "SUB2API_MINI_GROK_OAUTH_CLIENT_ID";
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
@@ -30,6 +37,10 @@ struct TokenResponse {
     id_token: Option<String>,
     #[serde(default)]
     expires_in: Option<i64>,
+    #[serde(default)]
+    token_type: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,6 +320,9 @@ pub async fn refresh_if_needed(state: &AppState, account: &mut Account) -> ApiRe
     if account.row.platform == "anthropic" {
         return crate::claude_oauth::refresh_if_needed(state, account).await;
     }
+    if account.credentials.expires_at.is_none() && account.credentials.access_token.is_some() {
+        return Ok(());
+    }
     let expires_at = account.credentials.expires_at.unwrap_or(0);
     if expires_at > Utc::now().timestamp() + 300 {
         return Ok(());
@@ -367,16 +381,66 @@ async fn refresh_account_inner(
     })?;
 
     let client = state.client_for_account(account).await?;
-    let response = client
-        .post(OPENAI_TOKEN_URL)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token.as_str()),
-            ("client_id", OPENAI_CLIENT_ID),
-            ("scope", "openid profile email"),
-        ])
-        .send()
-        .await?;
+    let (token_url, configured_client_id, configured_client_secret, scope) =
+        match account.row.platform.as_str() {
+            "openai" => (
+                OPENAI_TOKEN_URL,
+                Some(OPENAI_CLIENT_ID.to_string()),
+                None,
+                Some("openid profile email"),
+            ),
+            "gemini" => (
+                GOOGLE_TOKEN_URL,
+                optional_runtime_env(GEMINI_CLIENT_ID_ENV),
+                optional_runtime_env(GEMINI_CLIENT_SECRET_ENV),
+                None,
+            ),
+            "antigravity" => (
+                GOOGLE_TOKEN_URL,
+                optional_runtime_env(ANTIGRAVITY_CLIENT_ID_ENV),
+                optional_runtime_env(ANTIGRAVITY_CLIENT_SECRET_ENV),
+                None,
+            ),
+            "grok" => (
+                GROK_TOKEN_URL,
+                optional_runtime_env(GROK_CLIENT_ID_ENV),
+                None,
+                None,
+            ),
+            _ => {
+                return Err(ApiError::bad_request(
+                    "OAUTH_PLATFORM_UNSUPPORTED",
+                    "OAuth refresh is not supported for this platform",
+                ));
+            }
+        };
+    let client_id = current
+        .client_id
+        .clone()
+        .or(configured_client_id)
+        .ok_or_else(|| {
+            ApiError::new(
+                http::StatusCode::BAD_GATEWAY,
+                "OAUTH_CLIENT_ID_REQUIRED",
+                "OAuth client_id is required for token refresh",
+            )
+        })?;
+    let client_secret = current
+        .provider_str("client_secret")
+        .map(str::to_string)
+        .or(configured_client_secret);
+    let mut form = vec![
+        ("grant_type", "refresh_token".to_string()),
+        ("refresh_token", refresh_token),
+        ("client_id", client_id.clone()),
+    ];
+    if let Some(secret) = client_secret {
+        form.push(("client_secret", secret));
+    }
+    if let Some(scope) = scope {
+        form.push(("scope", scope.to_string()));
+    }
+    let response = client.post(token_url).form(&form).send().await?;
     if !response.status().is_success() {
         sqlx::query(
             "UPDATE accounts SET last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -388,14 +452,22 @@ async fn refresh_account_inner(
         return Err(ApiError::new(
             http::StatusCode::BAD_GATEWAY,
             "OAUTH_REFRESH_FAILED",
-            "OpenAI rejected the OAuth token refresh",
+            format!("{} rejected the OAuth token refresh", account.row.platform),
         ));
     }
     let token: TokenResponse = response.json().await?;
     let old_refresh = current.refresh_token.clone();
     let mut updated = credentials_from_token(token, old_refresh);
+    updated.client_id = Some(client_id);
+    updated.provider = current.provider.clone();
     if updated.email.is_none() {
         updated.email = current.email.take();
+    }
+    if updated.id_token.is_none() {
+        updated.id_token = current.id_token.take();
+    }
+    if updated.scope.is_none() {
+        updated.scope = current.scope.take();
     }
     if updated.chatgpt_account_id.is_none() {
         updated.chatgpt_account_id = current.chatgpt_account_id.take();
@@ -415,6 +487,13 @@ async fn refresh_account_inner(
     Ok(())
 }
 
+fn optional_runtime_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn credentials_from_token(token: TokenResponse, previous_refresh: Option<String>) -> Credentials {
     let mut credentials = Credentials {
         access_token: Some(token.access_token.clone()),
@@ -422,6 +501,8 @@ fn credentials_from_token(token: TokenResponse, previous_refresh: Option<String>
         id_token: token.id_token.clone(),
         expires_at: Some(Utc::now().timestamp() + token.expires_in.unwrap_or(3600)),
         client_id: Some(OPENAI_CLIENT_ID.into()),
+        token_type: token.token_type,
+        scope: token.scope,
         ..Default::default()
     };
     enrich_from_jwt(
@@ -552,6 +633,8 @@ mod tests {
                 refresh_token: None,
                 id_token: None,
                 expires_in: Some(3600),
+                token_type: None,
+                scope: None,
             },
             Some(account_id),
         )

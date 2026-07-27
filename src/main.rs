@@ -25,6 +25,7 @@ mod oauth;
 mod ops;
 mod orders;
 mod prompt_audit;
+mod provider_auth;
 mod proxies;
 mod public;
 mod redeem;

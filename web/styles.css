@@ -959,22 +959,34 @@ tbody tr:hover { background: #fafbf9; }
 .account-create-form > .field > label, .account-create-section > label { display: block; margin-bottom: 9px; color: var(--ink); font-size: .88rem; font-weight: 650; }
 .account-create-form textarea { min-height: 78px; }
 .account-create-section { margin-bottom: 16px; }
-.account-create-platforms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 5px; background: var(--surface-soft); border-radius: 8px; }
+.account-create-platforms { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 5px; background: var(--surface-soft); border-radius: 8px; }
 .account-create-platforms button { display: flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; color: var(--muted); background: transparent; border: 0; border-radius: 6px; font-size: .94rem; font-weight: 650; }
 .account-create-platforms button:hover { color: var(--ink); }
 .account-create-platforms button.selected { color: var(--green-strong); background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
 .account-create-platforms button.selected.anthropic { color: #e85d0f; }
+.account-create-platforms button.selected.openai { color: #059669; }
+.account-create-platforms button.selected.gemini { color: #2563eb; }
+.account-create-platforms button.selected.antigravity { color: #7c3aed; }
+.account-create-platforms button.selected.grok { color: #111827; }
 .account-create-platforms .app-icon { width: 19px; height: 19px; }
-.account-create-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.account-create-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.account-create-types.count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.account-create-types.count-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .account-create-type { display: flex; min-height: 72px; align-items: center; gap: 12px; padding: 11px 14px; text-align: left; color: var(--ink); background: var(--surface); border: 2px solid var(--line); border-radius: 8px; }
 .account-create-type:hover { border-color: var(--line-strong); }
 .account-create-type.selected { border-color: #8b5cf6; background: #faf7ff; }
 .account-create-type.selected.anthropic { border-color: #f97316; background: #fff8f1; }
 .account-create-type.selected.openai { border-color: #10b981; background: #f2fbf7; }
+.account-create-type.selected.gemini { border-color: #4285f4; background: #f3f7ff; }
+.account-create-type.selected.antigravity { border-color: #8b5cf6; background: #faf7ff; }
+.account-create-type.selected.grok { border-color: #111827; background: #f5f6f7; }
 .account-create-type-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; color: var(--muted); background: var(--surface-soft); border-radius: 8px; }
 .account-create-type.selected .account-create-type-icon { color: white; background: #8b5cf6; }
 .account-create-type.selected.anthropic .account-create-type-icon { background: #f97316; }
 .account-create-type.selected.openai .account-create-type-icon { background: #10b981; }
+.account-create-type.selected.gemini .account-create-type-icon { background: #4285f4; }
+.account-create-type.selected.antigravity .account-create-type-icon { background: #8b5cf6; }
+.account-create-type.selected.grok .account-create-type-icon { background: #111827; }
 .account-create-type-icon .app-icon { width: 20px; height: 20px; }
 .account-create-type strong, .account-create-type small { display: block; }
 .account-create-type strong { margin-bottom: 4px; font-size: .94rem; }
@@ -986,6 +998,9 @@ tbody tr:hover { background: #fafbf9; }
 .account-create-methods button small { color: var(--muted); }
 .account-create-methods button.selected { border-color: #12b8a6; box-shadow: 0 0 0 1px #12b8a6; }
 .account-create-credentials { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+.account-create-provider-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.account-create-provider-fields .provider-span { grid-column: 1 / -1; }
+.account-create-provider-fields textarea { min-height: 118px; font-family: "IBM Plex Mono", "Noto Sans Mono", monospace; }
 .account-create-advanced { margin-top: 2px; padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; }
 .account-create-advanced summary { cursor: pointer; color: var(--muted); font-size: .84rem; font-weight: 650; }
 .account-create-advanced[open] summary { margin-bottom: 14px; }
@@ -996,6 +1011,9 @@ tbody tr:hover { background: #fafbf9; }
 .account-auth-mark { display: grid; width: 54px; height: 54px; margin: 0 auto; place-items: center; color: white; border-radius: 8px; }
 .account-auth-mark.anthropic { background: #f97316; }
 .account-auth-mark.openai { background: #10b981; }
+.account-auth-mark.gemini { background: #4285f4; }
+.account-auth-mark.antigravity { background: #8b5cf6; }
+.account-auth-mark.grok { background: #111827; }
 .account-auth-mark .app-icon { width: 26px; height: 26px; }
 .account-auth-ready { display: block; margin-bottom: 18px; color: var(--green-strong); font-size: .8rem; }
 .account-auth-panel .field { margin-top: 14px; text-align: left; }
@@ -1003,6 +1021,9 @@ tbody tr:hover { background: #fafbf9; }
 .account-auth-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; color: var(--muted); font-size: .78rem; }
 .account-auth-divider::before, .account-auth-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .account-platform-badge.anthropic { color: #c2410c; background: #fff3e9; border-color: #fed7aa; }
+.account-platform-badge.gemini { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
+.account-platform-badge.antigravity { color: #6d28d9; background: #f5f3ff; border-color: #ddd6fe; }
+.account-platform-badge.grok { color: #111827; background: #f3f4f6; border-color: #d1d5db; }
 .user-detail-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-bottom: 18px; background: var(--line); border: 1px solid var(--line); }
 .user-detail-summary > div { min-width: 0; padding: 14px; background: #f8f9f7; }
 .user-detail-summary span { display: block; color: var(--muted); font-size: .75rem; }
@@ -1095,7 +1116,9 @@ tbody tr:hover { background: #fafbf9; }
   .account-create-steps i { width: 20px; }
   .account-create-steps span { width: 32px; height: 32px; }
   .account-create-steps strong { font-size: .78rem; }
-  .account-create-types, .account-create-methods, .account-create-credentials { grid-template-columns: 1fr; }
+  .account-create-platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .account-create-types, .account-create-types.count-2, .account-create-types.count-3, .account-create-methods, .account-create-credentials, .account-create-provider-fields { grid-template-columns: 1fr; }
+  .account-create-provider-fields .provider-span { grid-column: auto; }
   .account-create-type { min-height: 74px; }
   .inline-filters { grid-template-columns: 1fr; }
   .pricing-grid { grid-template-columns: 1fr; }
@@ -1316,7 +1339,14 @@ html[data-theme="dark"] .account-platform-badge.anthropic { color: #fdba74; back
 html[data-theme="dark"] .account-create-type.selected { background: #241a35; }
 html[data-theme="dark"] .account-create-type.selected.anthropic { background: #321b10; }
 html[data-theme="dark"] .account-create-type.selected.openai { background: #0d2b23; }
+html[data-theme="dark"] .account-create-type.selected.gemini { background: #13233f; }
+html[data-theme="dark"] .account-create-type.selected.antigravity { background: #241a35; }
+html[data-theme="dark"] .account-create-type.selected.grok { background: #111827; }
 html[data-theme="dark"] .account-create-platforms button.selected { background: #1e293b; }
+html[data-theme="dark"] .account-create-platforms button.selected.grok { color: #f9fafb; }
+html[data-theme="dark"] .account-platform-badge.gemini { color: #93c5fd; background: #172554; border-color: #1e40af; }
+html[data-theme="dark"] .account-platform-badge.antigravity { color: #c4b5fd; background: #2e1065; border-color: #5b21b6; }
+html[data-theme="dark"] .account-platform-badge.grok { color: #f3f4f6; background: #111827; border-color: #4b5563; }
 html[data-theme="dark"] .account-tools-menu button:hover,
 html[data-theme="dark"] .account-action-popover button:hover { background: #1e293b; }
 

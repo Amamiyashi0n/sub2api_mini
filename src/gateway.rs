@@ -59,8 +59,11 @@ impl Endpoint {
 
     fn platform(self) -> &'static str {
         match self {
-            Self::Messages | Self::CountTokens => "anthropic",
-            Self::Responses | Self::ChatCompletions | Self::Models => "openai",
+            Self::Messages => "anthropic_messages",
+            Self::CountTokens => "anthropic",
+            Self::Responses => "openai_responses",
+            Self::ChatCompletions => "openai_chat",
+            Self::Models => "openai_models",
         }
     }
 }
@@ -616,8 +619,12 @@ async fn proxy_json(
         }
 
         let convert_chat = matches!(endpoint, Endpoint::ChatCompletions)
-            && scheduled.account.row.platform == "openai"
+            && matches!(scheduled.account.row.platform.as_str(), "openai" | "grok")
             && scheduled.account.row.kind == "oauth";
+        let provider_nonstream = matches!(
+            scheduled.account.row.account_type.as_str(),
+            "bedrock" | "service_account"
+        );
         let upstream_endpoint = if convert_chat {
             Endpoint::Responses
         } else {
@@ -714,7 +721,7 @@ async fn proxy_json(
                     started,
                     response,
                     convert_chat,
-                    stream_requested,
+                    stream_requested && !provider_nonstream,
                     service_tier,
                     active_request,
                     RequestTelemetry::with_attempts(upstream_attempts),
@@ -970,6 +977,22 @@ async fn send_upstream(
     incoming_headers: &HeaderMap,
     body: Option<Vec<u8>>,
 ) -> ApiResult<reqwest::Response> {
+    if account.row.account_type == "bedrock" || account.row.account_type == "service_account" {
+        if !matches!(endpoint, Endpoint::Messages) {
+            return Err(ApiError::bad_request(
+                "PROVIDER_ENDPOINT_UNSUPPORTED",
+                "Bedrock and Vertex accounts currently accept the Messages endpoint",
+            ));
+        }
+        let body = body.as_deref().ok_or_else(|| {
+            ApiError::bad_request("REQUEST_BODY_REQUIRED", "request body is required")
+        })?;
+        return if account.row.account_type == "bedrock" {
+            crate::provider_auth::send_bedrock(state, account, body).await
+        } else {
+            crate::provider_auth::send_vertex(state, account, incoming_headers, body).await
+        };
+    }
     let url = upstream_url(account, endpoint)?;
     let method = if matches!(endpoint, Endpoint::Models) {
         Method::GET
@@ -994,7 +1017,9 @@ async fn send_upstream(
         }
     }
     request = request.header(header::CONTENT_TYPE, "application/json");
-    if account.row.platform == "anthropic" {
+    if account.row.platform == "anthropic"
+        || (account.row.platform == "antigravity" && account.row.account_type == "upstream")
+    {
         request = request.header(
             "anthropic-version",
             incoming_headers
@@ -1027,6 +1052,9 @@ async fn send_upstream(
                 )
             })?;
             request = request.header("x-api-key", token);
+            if account.row.platform == "antigravity" {
+                request = request.bearer_auth(token);
+            }
         }
     } else if account.row.kind == "oauth" {
         let token = account.credentials.access_token.as_deref().ok_or_else(|| {
@@ -1037,10 +1065,12 @@ async fn send_upstream(
             )
         })?;
         request = request.bearer_auth(token);
-        if let Some(account_id) = account.credentials.chatgpt_account_id.as_deref() {
-            request = request.header("chatgpt-account-id", account_id);
+        if account.row.platform == "openai" {
+            if let Some(account_id) = account.credentials.chatgpt_account_id.as_deref() {
+                request = request.header("chatgpt-account-id", account_id);
+            }
+            request = request.header("originator", "codex_cli_rs");
         }
-        request = request.header("originator", "codex_cli_rs");
     } else {
         let token = account.credentials.api_key.as_deref().ok_or_else(|| {
             ApiError::new(
@@ -1059,7 +1089,15 @@ async fn send_upstream(
 
 fn upstream_url(account: &Account, endpoint: Endpoint) -> ApiResult<String> {
     let base = account.row.base_url.trim_end_matches('/');
-    let suffix = if account.row.platform == "anthropic" {
+    let suffix = if account.row.platform == "gemini" && account.row.kind == "api_key" {
+        if base.ends_with("/v1beta/openai") {
+            endpoint.path().to_string()
+        } else {
+            format!("v1beta/openai/{}", endpoint.path())
+        }
+    } else if account.row.platform == "anthropic"
+        || (account.row.platform == "antigravity" && account.row.account_type == "upstream")
+    {
         if base.ends_with("/v1") {
             endpoint.path().to_string()
         } else {
@@ -2167,6 +2205,73 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{config::Config, crypto::Crypto, db, models::Credentials};
+
+    fn provider_account(platform: &str, kind: &str, account_type: &str, base_url: &str) -> Account {
+        Account {
+            row: AccountRow {
+                id: 1,
+                name: "provider".into(),
+                kind: kind.into(),
+                platform: platform.into(),
+                account_type: account_type.into(),
+                base_url: base_url.into(),
+                encrypted_credentials: String::new(),
+                priority: 50,
+                concurrency: 3,
+                enabled: true,
+                cooldown_until: None,
+                last_used_at: None,
+                last_error: None,
+                proxy_id: None,
+                proxy_name: None,
+                proxy_active: None,
+                encrypted_proxy_url: None,
+                parent_account_id: None,
+                quota_dimension: "global".into(),
+                notes: String::new(),
+                crs_account_id: None,
+                tls_fingerprint_profile_id: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            credentials: Credentials::default(),
+            proxy_url: None,
+        }
+    }
+
+    #[test]
+    fn builds_provider_specific_openai_compatible_urls() {
+        let gemini = provider_account(
+            "gemini",
+            "api_key",
+            "api_key",
+            "https://generativelanguage.googleapis.com",
+        );
+        assert_eq!(
+            upstream_url(&gemini, Endpoint::ChatCompletions).unwrap(),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        let grok = provider_account(
+            "grok",
+            "oauth",
+            "oauth",
+            "https://cli-chat-proxy.grok.com/v1",
+        );
+        assert_eq!(
+            upstream_url(&grok, Endpoint::Responses).unwrap(),
+            "https://cli-chat-proxy.grok.com/v1/responses"
+        );
+        let antigravity = provider_account(
+            "antigravity",
+            "api_key",
+            "upstream",
+            "https://gateway.example/antigravity",
+        );
+        assert_eq!(
+            upstream_url(&antigravity, Endpoint::Messages).unwrap(),
+            "https://gateway.example/antigravity/v1/messages"
+        );
+    }
 
     #[test]
     fn converts_chat_request_to_responses() {

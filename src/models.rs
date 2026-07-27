@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Map, Value};
 use sqlx::FromRow;
 
 use crate::{
@@ -9,6 +10,11 @@ use crate::{
 pub const DEFAULT_API_BASE_URL: &str = "https://api.openai.com";
 pub const DEFAULT_OAUTH_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
+pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+pub const DEFAULT_GEMINI_OAUTH_BASE_URL: &str = "https://cloudcode-pa.googleapis.com";
+pub const DEFAULT_ANTIGRAVITY_BASE_URL: &str = "https://cloudcode-pa.googleapis.com";
+pub const DEFAULT_GROK_API_BASE_URL: &str = "https://api.x.ai";
+pub const DEFAULT_GROK_OAUTH_BASE_URL: &str = "https://cli-chat-proxy.grok.com/v1";
 
 pub fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
@@ -44,6 +50,18 @@ pub struct Credentials {
     pub org_uuid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_uuid: Option<String>,
+    #[serde(default, flatten)]
+    pub provider: Map<String, Value>,
+}
+
+impl Credentials {
+    pub fn provider_str(&self, key: &str) -> Option<&str> {
+        self.provider
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -129,6 +147,15 @@ impl AccountRow {
                 "Inherited OAuth token".into()
             } else if self.account_type == "setup_token" {
                 "Setup Token".into()
+            } else if self.account_type == "bedrock" {
+                match self.kind.as_str() {
+                    "bedrock" => "AWS credential".into(),
+                    _ => "Bedrock credential".into(),
+                }
+            } else if self.account_type == "service_account" {
+                "Service Account".into()
+            } else if self.account_type == "upstream" {
+                "Upstream API key".into()
             } else if self.kind == "oauth" {
                 "OAuth token".into()
             } else {
@@ -259,6 +286,21 @@ pub fn normalize_base_url(value: &str, kind: &str) -> ApiResult<String> {
 pub fn normalize_account_base_url(value: &str, kind: &str, platform: &str) -> ApiResult<String> {
     let default = match platform {
         "anthropic" => DEFAULT_ANTHROPIC_BASE_URL,
+        "gemini" => {
+            if kind == "oauth" {
+                DEFAULT_GEMINI_OAUTH_BASE_URL
+            } else {
+                DEFAULT_GEMINI_BASE_URL
+            }
+        }
+        "antigravity" => DEFAULT_ANTIGRAVITY_BASE_URL,
+        "grok" => {
+            if kind == "oauth" {
+                DEFAULT_GROK_OAUTH_BASE_URL
+            } else {
+                DEFAULT_GROK_API_BASE_URL
+            }
+        }
         "openai" => {
             if kind == "oauth" {
                 DEFAULT_OAUTH_BASE_URL
@@ -269,7 +311,7 @@ pub fn normalize_account_base_url(value: &str, kind: &str, platform: &str) -> Ap
         _ => {
             return Err(ApiError::bad_request(
                 "INVALID_ACCOUNT_PLATFORM",
-                "platform must be openai or anthropic",
+                "platform must be anthropic, openai, gemini, antigravity, or grok",
             ));
         }
     };
@@ -279,7 +321,7 @@ pub fn normalize_account_base_url(value: &str, kind: &str, platform: &str) -> Ap
         } else {
             value
         },
-        if platform == "anthropic" {
+        if !matches!(platform, "openai" | "grok") {
             "api_key"
         } else {
             kind

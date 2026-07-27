@@ -115,6 +115,7 @@ panelOpen: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18M14
   key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.8 12.2 8.7-8.7M15 8l2 2M17 6l2 2"/>',
   bolt: '<path d="m13 2-9 12h8l-1 8 9-12h-8l1-8Z"/>',
   sparkles: '<path d="m12 3-1.2 4.8L6 9l4.8 1.2L12 15l1.2-4.8L18 9l-4.8-1.2L12 3ZM5 16l-.7 2.3L2 19l2.3.7L5 22l.7-2.3L8 19l-2.3-.7L5 16ZM19 13l-.7 2.3-2.3.7 2.3.7L19 19l.7-2.3L22 16l-2.3-.7L19 13Z"/>',
+  cloud: '<path d="M17.5 19H7a5 5 0 1 1 1.7-9.7A6 6 0 0 1 20 12a3.5 3.5 0 0 1-2.5 7Z"/>',
   externalLink: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   lock: '<rect width="16" height="12" x="4" y="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
   logout: '<path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>',
@@ -883,12 +884,12 @@ currentGroups = groups.data;
 currentTlsProfiles = tlsProfiles.data;
 selectedAccountIds = new Set([...selectedAccountIds].filter(id => currentAccounts.some(account => account.id === id)));
 page.innerHTML = `
-  ${pageHeader("账号管理", `${result.data.length} 个账号 · Claude 与 OpenAI 上游连接及调度`)}
+  ${pageHeader("账号管理", `${result.data.length} 个账号 · 五平台上游连接及调度`)}
   <section class="account-page-toolbar" aria-label="账号筛选与操作">
     <div class="account-filters">
       <label class="account-search">${appIcon("search")}<input id="account-search" type="search" value="${escapeHtml(accountFilters.search)}" placeholder="搜索账号..." aria-label="搜索账号"></label>
-      <select id="account-platform-filter" aria-label="账号平台"><option value="">全部平台</option><option value="anthropic" ${accountFilters.platform === "anthropic" ? "selected" : ""}>Anthropic</option><option value="openai" ${accountFilters.platform === "openai" ? "selected" : ""}>OpenAI</option></select>
-      <select id="account-kind-filter" aria-label="账号类型"><option value="">全部类型</option><option value="oauth" ${accountFilters.kind === "oauth" ? "selected" : ""}>OAuth</option><option value="setup_token" ${accountFilters.kind === "setup_token" ? "selected" : ""}>Setup Token</option><option value="api_key" ${accountFilters.kind === "api_key" ? "selected" : ""}>API Key</option></select>
+      <select id="account-platform-filter" aria-label="账号平台"><option value="">全部平台</option>${Object.entries(accountPlatformDefinitions).map(([value, definition]) => `<option value="${value}" ${accountFilters.platform === value ? "selected" : ""}>${definition.label}</option>`).join("")}</select>
+      <select id="account-kind-filter" aria-label="账号类型"><option value="">全部类型</option><option value="oauth" ${accountFilters.kind === "oauth" ? "selected" : ""}>OAuth</option><option value="setup_token" ${accountFilters.kind === "setup_token" ? "selected" : ""}>Setup Token</option><option value="api_key" ${accountFilters.kind === "api_key" ? "selected" : ""}>API Key</option><option value="bedrock" ${accountFilters.kind === "bedrock" ? "selected" : ""}>AWS Bedrock</option><option value="service_account" ${accountFilters.kind === "service_account" ? "selected" : ""}>Service Account</option><option value="upstream" ${accountFilters.kind === "upstream" ? "selected" : ""}>Upstream</option></select>
       <select id="account-status-filter" aria-label="账号状态"><option value="">全部状态</option><option value="active" ${accountFilters.status === "active" ? "selected" : ""}>正常</option><option value="inactive" ${accountFilters.status === "inactive" ? "selected" : ""}>停用</option><option value="cooldown" ${accountFilters.status === "cooldown" ? "selected" : ""}>冷却中</option><option value="error" ${accountFilters.status === "error" ? "selected" : ""}>错误</option></select>
       <select id="account-group-filter" aria-label="路由分组"><option value="">全部分组</option><option value="ungrouped" ${accountFilters.group === "ungrouped" ? "selected" : ""}>未分组</option>${currentGroups.map(group => `<option value="${group.id}" ${String(accountFilters.group) === String(group.id) ? "selected" : ""}>${escapeHtml(group.name)}</option>`).join("")}</select>
     </div>
@@ -901,7 +902,7 @@ page.innerHTML = `
       </div></div>
       <div class="account-tools-dropdown" id="account-tools-dropdown"><button class="button secondary account-tools-toggle" id="account-tools-toggle" type="button" aria-label="更多操作" aria-expanded="false">${appIcon("more")}<span>更多操作</span>${appIcon("chevronDown", "account-tools-chevron")}</button><div class="account-tools-menu" id="account-tools-menu" hidden>
         <section><p>数据操作</p>
-          <button id="sync-crs-accounts" type="button">${appIcon("refresh")}<span><strong>从 CRS 同步</strong><small>预览并同步 Claude 与 OpenAI 账号</small></span></button>
+          <button id="sync-crs-accounts" type="button">${appIcon("refresh")}<span><strong>从 CRS 同步</strong><small>预览并同步 Claude、OpenAI 与 Gemini 账号</small></span></button>
           <button id="import-accounts" type="button">${appIcon("upload")}<span><strong>导入账号</strong><small>导入 Sub2API JSON 备份</small></span></button>
           <button id="export-accounts" type="button">${appIcon("download")}<span><strong>${selectedAccountIds.size ? "导出选中" : "导出账号"}</strong><small>${selectedAccountIds.size ? `已选择 ${selectedAccountIds.size} 个账号` : "导出含凭证的敏感备份"}</small></span></button>
         </section>
@@ -966,11 +967,11 @@ const start = (accountPage - 1) * accountPageSize;
 const visible = accounts.slice(start, start + accountPageSize);
 const target = page.querySelector("#account-collection");
 const hasFilters = Object.values(accountFilters).some(Boolean);
-const subtitle = accounts.length === currentAccounts.length ? `${currentAccounts.length} 个账号 · Claude 与 OpenAI 上游连接及调度` : `显示 ${accounts.length} / ${currentAccounts.length} 个账号`;
+const subtitle = accounts.length === currentAccounts.length ? `${currentAccounts.length} 个账号 · 五平台上游连接及调度` : `显示 ${accounts.length} / ${currentAccounts.length} 个账号`;
 page.querySelector(".page-header p").textContent = subtitle;
 const topbarDescription = document.querySelector("#topbar-description");
 if (topbarDescription && currentRouteName() === "accounts") { topbarDescription.textContent = subtitle; topbarDescription.hidden = false; }
-target.innerHTML = `${currentAccounts.length ? accountBulkBar(accounts, visible) : ""}${accounts.length ? `${accountTable(visible)}${accountPagination(accounts.length, start, visible.length)}` : emptyState(currentAccounts.length ? "没有匹配账号" : "暂无账号", currentAccounts.length ? "调整筛选条件后重试" : "添加 Claude 或 OpenAI 账号后即可转发请求", currentAccounts.length ? (hasFilters ? "清除筛选" : "") : "添加账号", currentAccounts.length ? "reset-account-filters" : "empty-add-account")}<div id="account-menu-host">${visible.map(accountActionMenu).join("")}</div>`;
+target.innerHTML = `${currentAccounts.length ? accountBulkBar(accounts, visible) : ""}${accounts.length ? `${accountTable(visible)}${accountPagination(accounts.length, start, visible.length)}` : emptyState(currentAccounts.length ? "没有匹配账号" : "暂无账号", currentAccounts.length ? "调整筛选条件后重试" : "添加任一支持平台账号后即可参与网关调度", currentAccounts.length ? (hasFilters ? "清除筛选" : "") : "添加账号", currentAccounts.length ? "reset-account-filters" : "empty-add-account")}<div id="account-menu-host">${visible.map(accountActionMenu).join("")}</div>`;
 target.querySelector("#empty-add-account")?.addEventListener("click", () => openAccountModal());
 target.querySelector("#reset-account-filters")?.addEventListener("click", () => {
   accountFilters = { search: "", platform: "", kind: "", status: "", group: "" };
@@ -1037,7 +1038,7 @@ return currentAccounts.filter(account => {
   const stateName = accountState(account);
   if (query && ![account.id, account.name, account.email, account.base_url, account.proxy_name, account.notes].some(value => String(value || "").toLowerCase().includes(query))) return false;
   if (accountFilters.platform && account.platform !== accountFilters.platform) return false;
-  if (accountFilters.kind && (accountFilters.kind === "setup_token" ? account.account_type !== "setup_token" : account.kind !== accountFilters.kind)) return false;
+  if (accountFilters.kind && account.account_type !== accountFilters.kind && account.kind !== accountFilters.kind) return false;
   if (accountFilters.status && stateName !== accountFilters.status) return false;
   if (accountFilters.group === "ungrouped" && groups.length) return false;
   if (accountFilters.group && accountFilters.group !== "ungrouped" && !groups.some(group => String(group.id) === String(accountFilters.group))) return false;
@@ -1143,9 +1144,10 @@ try {
 } catch (_) { return { key: "name", order: "asc" }; }
 }
 function accountType(account) {
-const platform = account.platform === "anthropic" ? "Anthropic" : "OpenAI";
-const type = account.account_type === "setup_token" ? "Setup Token" : account.kind === "oauth" ? `OAuth${account.parent_account_id ? " · Spark" : ""}` : "API Key";
-return `<div class="account-type-stack"><span class="account-platform-badge ${account.platform === "anthropic" ? "anthropic" : ""}">${platform}</span><span>${type}</span></div>`;
+const platform = accountPlatformDefinitions[account.platform]?.label || account.platform.toUpperCase();
+const typeLabels = { setup_token: "Setup Token", api_key: "API Key", oauth: "OAuth", bedrock: "AWS Bedrock", service_account: "Service Account", upstream: "Upstream" };
+const type = `${typeLabels[account.account_type] || typeLabels[account.kind] || account.account_type}${account.parent_account_id ? " · Spark" : ""}`;
+return `<div class="account-type-stack"><span class="account-platform-badge ${escapeHtml(account.platform)}">${escapeHtml(platform)}</span><span>${escapeHtml(type)}</span></div>`;
 }
 function accountTodayStats(account) {
 const stats = account.today_stats || {};
@@ -1366,30 +1368,71 @@ try {
 } catch (error) { modal.querySelector("#account-bulk-edit-error").textContent = error.message; button.disabled = false; }
 }
 let accountCreateState = null;
+const accountPlatformDefinitions = {
+  anthropic: {
+    label: "Anthropic", icon: "sparkles", defaultUrl: "https://api.anthropic.com", defaultType: "oauth",
+    types: [
+      { value: "oauth", label: "Claude Code", hint: "OAuth / Setup Token", icon: "sparkles" },
+      { value: "api_key", label: "Claude Console", hint: "API Key", icon: "key" },
+      { value: "bedrock", label: "AWS Bedrock", hint: "SigV4 / API Key", icon: "server" },
+      { value: "service_account", label: "Vertex", hint: "Service Account", icon: "cloud" },
+    ],
+  },
+  openai: {
+    label: "OpenAI", icon: "bolt", defaultUrl: "https://api.openai.com", defaultType: "oauth",
+    types: [
+      { value: "oauth", label: "OAuth", hint: "ChatGPT / Codex", icon: "link" },
+      { value: "api_key", label: "API Key", hint: "OpenAI API", icon: "key" },
+    ],
+  },
+  gemini: {
+    label: "Gemini", icon: "sparkles", defaultUrl: "https://generativelanguage.googleapis.com", defaultType: "oauth",
+    types: [
+      { value: "oauth", label: "Gemini CLI", hint: "Google OAuth", icon: "link" },
+      { value: "api_key", label: "Gemini API", hint: "AI Studio API Key", icon: "key" },
+      { value: "service_account", label: "Vertex", hint: "Service Account", icon: "cloud" },
+    ],
+  },
+  antigravity: {
+    label: "Antigravity", icon: "cloud", defaultUrl: "https://cloudcode-pa.googleapis.com", defaultType: "oauth",
+    types: [
+      { value: "oauth", label: "OAuth", hint: "Google Cloud 授权", icon: "link" },
+      { value: "upstream", label: "Upstream", hint: "上游 API Key", icon: "key" },
+    ],
+  },
+  grok: {
+    label: "Grok", icon: "globe", defaultUrl: "https://api.x.ai", defaultType: "oauth",
+    types: [
+      { value: "oauth", label: "Grok Build", hint: "xAI OAuth", icon: "link" },
+      { value: "api_key", label: "xAI API", hint: "API Key", icon: "key" },
+    ],
+  },
+};
+function accountPlatformDefaultUrl(platform, category = "oauth") {
+if (platform === "grok") return category === "oauth" ? "https://cli-chat-proxy.grok.com/v1" : "https://api.x.ai";
+if (platform === "gemini") return category === "oauth" ? "https://cloudcode-pa.googleapis.com" : "https://generativelanguage.googleapis.com";
+return accountPlatformDefinitions[platform]?.defaultUrl || "";
+}
 function openAccountModal() {
 accountCreateState = {
   step: 1, platform: "anthropic", category: "oauth", addMethod: "oauth",
   name: "", notes: "", base_url: "https://api.anthropic.com", api_key: "",
   priority: 50, concurrency: 3, proxy_id: "", tls_fingerprint_profile_id: "",
-  auth_json: "", auth_code: "", claude_session_id: ""
+  auth_json: "", auth_code: "", claude_session_id: "", access_token: "", refresh_token: "", client_id: "", client_secret: "",
+  auth_mode: "sigv4", aws_access_key_id: "", aws_secret_access_key: "", aws_session_token: "",
+  region: "us-east-1", service_account_json: "", location: "us-central1"
 };
 openModal("添加账号", "", "");
 modal.classList.add("account-create-modal");
 renderAccountCreateModal();
 }
 function accountCreateSteps(platform, step) {
-const title = platform === "anthropic" ? "Claude 账号授权" : "OpenAI 账号授权";
+const title = `${accountPlatformDefinitions[platform]?.label || platform} 账号授权`;
 return `<div class="account-create-steps" aria-label="添加账号步骤"><div class="active"><span>1</span><strong>授权方式</strong></div><i></i><div class="${step === 2 ? "active" : ""}"><span>2</span><strong>${title}</strong></div></div>`;
 }
 function accountCreateTypeCards(state) {
-if (state.platform === "anthropic") return `<div class="account-create-types">
-  <button class="account-create-type ${state.category === "oauth" ? "selected anthropic" : ""}" data-account-create-type="oauth" type="button"><span class="account-create-type-icon">${appIcon("sparkles")}</span><span><strong>Claude Code</strong><small>OAuth / Setup Token</small></span></button>
-  <button class="account-create-type ${state.category === "api_key" ? "selected" : ""}" data-account-create-type="api_key" type="button"><span class="account-create-type-icon">${appIcon("key")}</span><span><strong>Claude Console</strong><small>API Key</small></span></button>
-</div>`;
-return `<div class="account-create-types two-column">
-  <button class="account-create-type ${state.category === "oauth" ? "selected openai" : ""}" data-account-create-type="oauth" type="button"><span class="account-create-type-icon">${appIcon("link")}</span><span><strong>OAuth</strong><small>ChatGPT / Codex 授权</small></span></button>
-  <button class="account-create-type ${state.category === "api_key" ? "selected" : ""}" data-account-create-type="api_key" type="button"><span class="account-create-type-icon">${appIcon("key")}</span><span><strong>API Key</strong><small>OpenAI API</small></span></button>
-</div>`;
+const types = accountPlatformDefinitions[state.platform]?.types || [];
+return `<div class="account-create-types count-${types.length}">${types.map(type => `<button class="account-create-type ${state.category === type.value ? `selected ${state.platform}` : ""}" data-account-create-type="${type.value}" type="button"><span class="account-create-type-icon">${appIcon(type.icon)}</span><span><strong>${type.label}</strong><small>${type.hint}</small></span></button>`).join("")}</div>`;
 }
 function accountCreateMethod(state) {
 if (state.platform !== "anthropic" || state.category !== "oauth") return "";
@@ -1400,24 +1443,30 @@ return `<section class="account-create-section"><label>添加方式</label><div 
 }
 function accountCreateBasicBody(state) {
 const oauth = state.category === "oauth";
-const defaultUrl = state.platform === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com";
+const definition = accountPlatformDefinitions[state.platform];
+const defaultUrl = definition.defaultUrl;
+let credentials = "";
+if (["api_key", "upstream"].includes(state.category)) credentials = `<section class="account-create-credentials"><div class="field"><label for="base-url">Base URL</label><input id="base-url" data-account-create-field="base_url" value="${escapeHtml(state.base_url || defaultUrl)}" type="url" required></div><div class="field"><label for="upstream-key">API Key</label><input id="upstream-key" data-account-create-field="api_key" value="${escapeHtml(state.api_key)}" type="password" autocomplete="new-password" placeholder="请输入上游 API Key" required></div></section>`;
+if (state.category === "bedrock") credentials = `<section class="account-create-provider-fields"><div class="field"><label for="bedrock-auth-mode">认证方式</label><select id="bedrock-auth-mode" data-account-create-field="auth_mode"><option value="sigv4" ${state.auth_mode === "sigv4" ? "selected" : ""}>AWS SigV4</option><option value="api_key" ${state.auth_mode === "api_key" ? "selected" : ""}>Bedrock API Key</option></select></div><div class="field"><label for="bedrock-region">AWS Region</label><input id="bedrock-region" data-account-create-field="region" value="${escapeHtml(state.region)}" required></div>${state.auth_mode === "api_key" ? `<div class="field provider-span"><label for="upstream-key">Bedrock API Key</label><input id="upstream-key" data-account-create-field="api_key" value="${escapeHtml(state.api_key)}" type="password" autocomplete="new-password" required></div>` : `<div class="field"><label for="aws-access-key">Access Key ID</label><input id="aws-access-key" data-account-create-field="aws_access_key_id" value="${escapeHtml(state.aws_access_key_id)}" autocomplete="off" required></div><div class="field"><label for="aws-secret-key">Secret Access Key</label><input id="aws-secret-key" data-account-create-field="aws_secret_access_key" value="${escapeHtml(state.aws_secret_access_key)}" type="password" autocomplete="new-password" required></div><div class="field provider-span"><label for="aws-session-token">Session Token</label><input id="aws-session-token" data-account-create-field="aws_session_token" value="${escapeHtml(state.aws_session_token)}" type="password" autocomplete="new-password"><span class="field-hint">长期访问密钥可留空</span></div>`}</section>`;
+if (state.category === "service_account") credentials = `<section class="account-create-provider-fields"><div class="field"><label for="vertex-location">Vertex Location</label><input id="vertex-location" data-account-create-field="location" value="${escapeHtml(state.location)}" placeholder="global 或 us-east5" required></div><div class="field provider-span"><label for="service-account-json">Service Account JSON</label><textarea id="service-account-json" data-account-create-field="service_account_json" spellcheck="false" placeholder='{"project_id":"...","client_email":"...","private_key":"..."}' required>${escapeHtml(state.service_account_json)}</textarea></div></section>`;
 return `${oauth ? accountCreateSteps(state.platform, 1) : ""}<form id="account-create-form" class="account-create-form">
   <div class="field"><label for="account-name">账号名称</label><input id="account-name" data-account-create-field="name" value="${escapeHtml(state.name)}" placeholder="请输入账号名称" maxlength="120" required></div>
   <div class="field"><label for="account-notes">备注</label><textarea id="account-notes" data-account-create-field="notes" rows="3" maxlength="1000" placeholder="请输入备注">${escapeHtml(state.notes)}</textarea><span class="field-hint">备注可选</span></div>
   <section class="account-create-section"><label>平台</label><div class="account-create-platforms">
-    <button class="${state.platform === "anthropic" ? "selected anthropic" : ""}" data-account-create-platform="anthropic" type="button">${appIcon("sparkles")}<span>Anthropic</span></button>
-    <button class="${state.platform === "openai" ? "selected openai" : ""}" data-account-create-platform="openai" type="button">${appIcon("bolt")}<span>OpenAI</span></button>
+    ${Object.entries(accountPlatformDefinitions).map(([value, platform]) => `<button class="${state.platform === value ? `selected ${value}` : ""}" data-account-create-platform="${value}" type="button">${appIcon(platform.icon)}<span>${platform.label}</span></button>`).join("")}
   </div></section>
   <section class="account-create-section"><label>账号类型</label>${accountCreateTypeCards(state)}</section>
   ${accountCreateMethod(state)}
-  ${oauth ? "" : `<section class="account-create-credentials"><div class="field"><label for="base-url">Base URL</label><input id="base-url" data-account-create-field="base_url" value="${escapeHtml(state.base_url || defaultUrl)}" type="url" required></div><div class="field"><label for="upstream-key">API Key</label><input id="upstream-key" data-account-create-field="api_key" value="${escapeHtml(state.api_key)}" type="password" autocomplete="new-password" placeholder="${state.platform === "anthropic" ? "sk-ant-..." : "sk-..."}" required></div></section>`}
+  ${oauth ? "" : credentials}
   <details class="account-create-advanced"><summary>调度与网络设置</summary><div class="form-grid"><div class="field"><label for="priority">优先级</label><input id="priority" data-account-create-field="priority" type="number" min="0" value="${state.priority}" required></div><div class="field"><label for="concurrency">并发上限</label><input id="concurrency" data-account-create-field="concurrency" type="number" min="1" max="1000" value="${state.concurrency}" required></div></div><div class="form-grid"><div class="field"><label for="account-proxy">网络代理</label><select id="account-proxy" data-account-create-field="proxy_id">${proxyOptions(state.proxy_id)}</select></div><div class="field"><label for="account-tls-profile">TLS 指纹模板</label><select id="account-tls-profile" data-account-create-field="tls_fingerprint_profile_id">${tlsProfileOptions(state.tls_fingerprint_profile_id)}</select></div></div></details>
   <p class="form-error" id="account-error"></p>
 </form>`;
 }
 function accountCreateAuthorizationBody(state) {
 if (state.platform === "anthropic") return `${accountCreateSteps(state.platform, 2)}<div class="account-auth-panel"><div class="account-auth-mark anthropic">${appIcon("sparkles")}</div><h3>${state.addMethod === "setup_token" ? "获取 Claude Setup Token" : "授权 Claude Code 账号"}</h3><p>打开 Anthropic 授权页面完成登录，然后将页面返回的授权码粘贴到下方。</p><button class="button" id="start-claude-oauth" type="button">${appIcon("externalLink")}<span>${state.claude_session_id ? "重新打开授权页面" : "打开授权页面"}</span></button>${state.claude_session_id ? `<span class="account-auth-ready">授权会话已创建，有效期 30 分钟</span>` : ""}<div class="field"><label for="claude-auth-code">授权码</label><textarea id="claude-auth-code" data-account-create-field="auth_code" spellcheck="false" placeholder="code#state">${escapeHtml(state.auth_code)}</textarea></div><p class="form-error" id="account-error"></p></div>`;
-return `${accountCreateSteps(state.platform, 2)}<div class="account-auth-panel"><div class="account-auth-mark openai">${appIcon("bolt")}</div><h3>OpenAI 账号授权</h3><p>可使用浏览器完成 Codex OAuth，或导入官方 Codex 的 auth.json。</p><button class="button" id="start-openai-oauth" type="button">${appIcon("externalLink")}<span>浏览器 OAuth</span></button><div class="account-auth-divider"><span>或者导入</span></div><div class="field"><label for="openai-auth-json">Codex auth.json</label><textarea id="openai-auth-json" data-account-create-field="auth_json" spellcheck="false" placeholder='{"tokens":{"access_token":"..."}}'>${escapeHtml(state.auth_json)}</textarea></div><p class="form-error" id="account-error"></p></div>`;
+if (state.platform === "openai") return `${accountCreateSteps(state.platform, 2)}<div class="account-auth-panel"><div class="account-auth-mark openai">${appIcon("bolt")}</div><h3>OpenAI 账号授权</h3><p>可使用浏览器完成 Codex OAuth，或导入官方 Codex 的 auth.json。</p><button class="button" id="start-openai-oauth" type="button">${appIcon("externalLink")}<span>浏览器 OAuth</span></button><div class="account-auth-divider"><span>或者导入</span></div><div class="field"><label for="openai-auth-json">Codex auth.json</label><textarea id="openai-auth-json" data-account-create-field="auth_json" spellcheck="false" placeholder='{"tokens":{"access_token":"..."}}'>${escapeHtml(state.auth_json)}</textarea></div><p class="form-error" id="account-error"></p></div>`;
+const definition = accountPlatformDefinitions[state.platform];
+return `${accountCreateSteps(state.platform, 2)}<div class="account-auth-panel"><div class="account-auth-mark ${state.platform}">${appIcon(definition.icon)}</div><h3>${definition.label} 账号授权</h3><p>导入已有 OAuth Token。Refresh Token 用于到期自动刷新，Access Token 可选。</p><div class="field"><label for="provider-refresh-token">Refresh Token</label><textarea id="provider-refresh-token" data-account-create-field="refresh_token" spellcheck="false" placeholder="粘贴 Refresh Token">${escapeHtml(state.refresh_token)}</textarea></div><div class="field"><label for="provider-access-token">Access Token</label><textarea id="provider-access-token" data-account-create-field="access_token" spellcheck="false" placeholder="可选；留空时会使用 Refresh Token 获取">${escapeHtml(state.access_token)}</textarea></div><div class="form-grid"><div class="field"><label for="provider-client-id">OAuth Client ID</label><input id="provider-client-id" data-account-create-field="client_id" value="${escapeHtml(state.client_id)}" autocomplete="off"><span class="field-hint">使用 Refresh Token 时必填，或在服务环境变量中配置</span></div><div class="field"><label for="provider-client-secret">OAuth Client Secret</label><input id="provider-client-secret" data-account-create-field="client_secret" value="${escapeHtml(state.client_secret)}" type="password" autocomplete="new-password"><span class="field-hint">Google OAuth 通常需要；Grok 可留空</span></div></div><p class="form-error" id="account-error"></p></div>`;
 }
 function bindAccountCreateFields() {
 modal.querySelectorAll("[data-account-create-field]").forEach(input => input.addEventListener("input", event => {
@@ -1433,18 +1482,20 @@ modal.querySelector(".modal-footer")?.remove();
 const footer = document.createElement("div"); footer.className = "modal-footer";
 footer.innerHTML = state.step === 1
   ? `<button class="button secondary" data-close-modal type="button">取消</button><button class="button" id="account-create-next" type="button">${state.category === "oauth" ? "下一步" : "保存"}</button>`
-  : `<button class="button secondary" id="account-create-back" type="button">上一步</button><button class="button" id="account-create-finish" type="button">${state.platform === "anthropic" ? "完成授权" : "导入 auth.json"}</button>`;
+  : `<button class="button secondary" id="account-create-back" type="button">上一步</button><button class="button" id="account-create-finish" type="button">${state.platform === "anthropic" ? "完成授权" : state.platform === "openai" ? "导入 auth.json" : "导入 Token"}</button>`;
 modal.append(footer);
 bindAccountCreateFields();
 modal.querySelectorAll("[data-close-modal]").forEach(button => button.addEventListener("click", closeModal));
 modal.querySelectorAll("[data-account-create-platform]").forEach(button => button.addEventListener("click", event => {
   const platform = event.currentTarget.dataset.accountCreatePlatform;
-  state.platform = platform; state.category = "oauth"; state.addMethod = "oauth";
-  state.base_url = platform === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com";
+  const definition = accountPlatformDefinitions[platform];
+  state.platform = platform; state.category = definition.defaultType; state.addMethod = "oauth";
+  state.base_url = accountPlatformDefaultUrl(platform, state.category);
   renderAccountCreateModal();
 }));
-modal.querySelectorAll("[data-account-create-type]").forEach(button => button.addEventListener("click", event => { state.category = event.currentTarget.dataset.accountCreateType; renderAccountCreateModal(); }));
+modal.querySelectorAll("[data-account-create-type]").forEach(button => button.addEventListener("click", event => { state.category = event.currentTarget.dataset.accountCreateType; state.base_url = accountPlatformDefaultUrl(state.platform, state.category); renderAccountCreateModal(); }));
 modal.querySelectorAll("[data-account-create-method]").forEach(button => button.addEventListener("click", event => { state.addMethod = event.currentTarget.dataset.accountCreateMethod; renderAccountCreateModal(); }));
+modal.querySelector("#bedrock-auth-mode")?.addEventListener("change", event => { state.auth_mode = event.currentTarget.value; renderAccountCreateModal(); });
 modal.querySelector("#account-create-next")?.addEventListener("click", saveAccountCreateStep);
 modal.querySelector("#account-create-back")?.addEventListener("click", () => { state.step = 1; renderAccountCreateModal(); });
 modal.querySelector("#account-create-finish")?.addEventListener("click", finishAccountAuthorization);
@@ -1462,7 +1513,13 @@ const state = accountCreateState;
 if (state.category === "oauth") { state.step = 2; renderAccountCreateModal(); return; }
 const button = modal.querySelector("#account-create-next"); button.disabled = true;
 try {
-  await api("/api/admin/accounts", { method: "POST", body: JSON.stringify({ ...accountCreatePayload(), kind: "api_key", platform: state.platform, account_type: "api_key", base_url: state.base_url, api_key: state.api_key }) });
+  const credentials = state.category === "bedrock"
+    ? { auth_mode: state.auth_mode, region: state.region, aws_access_key_id: state.aws_access_key_id, aws_secret_access_key: state.aws_secret_access_key, aws_session_token: state.aws_session_token }
+    : state.category === "service_account"
+      ? { service_account_json: state.service_account_json, location: state.location }
+      : {};
+  const baseUrl = ["bedrock", "service_account"].includes(state.category) ? "" : state.base_url;
+  await api("/api/admin/accounts", { method: "POST", body: JSON.stringify({ ...accountCreatePayload(), kind: state.category, platform: state.platform, account_type: state.category, base_url: baseUrl, api_key: state.api_key, credentials }) });
   closeModal(); toast("账号已添加"); await renderRoute();
 } catch (error) { modal.querySelector("#account-error").textContent = error.message; button.disabled = false; }
 }
@@ -1486,11 +1543,13 @@ async function finishAccountAuthorization() {
 const state = accountCreateState; const button = modal.querySelector("#account-create-finish"); const error = modal.querySelector("#account-error");
 if (state.platform === "anthropic" && (!state.claude_session_id || !state.auth_code.trim())) { error.textContent = state.claude_session_id ? "请输入授权码" : "请先打开授权页面"; return; }
 if (state.platform === "openai" && !state.auth_json.trim()) { error.textContent = "请输入 auth.json 内容，或使用浏览器 OAuth"; return; }
+if (!["anthropic", "openai"].includes(state.platform) && !state.access_token.trim() && !state.refresh_token.trim()) { error.textContent = "请输入 Access Token 或 Refresh Token"; return; }
 button.disabled = true;
 try {
   const payload = accountCreatePayload();
   if (state.platform === "anthropic") await api("/api/admin/claude/oauth/exchange", { method: "POST", body: JSON.stringify({ ...payload, session_id: state.claude_session_id, code: state.auth_code }) });
-  else await api("/api/admin/oauth/import", { method: "POST", body: JSON.stringify({ ...payload, content: state.auth_json }) });
+  else if (state.platform === "openai") await api("/api/admin/oauth/import", { method: "POST", body: JSON.stringify({ ...payload, content: state.auth_json }) });
+  else await api("/api/admin/accounts", { method: "POST", body: JSON.stringify({ ...payload, kind: "oauth", platform: state.platform, account_type: "oauth", base_url: state.base_url, credentials: { access_token: state.access_token, refresh_token: state.refresh_token, token_type: "Bearer", client_id: state.client_id, client_secret: state.client_secret } }) });
   closeModal(); toast("账号已添加"); await renderRoute();
 } catch (requestError) { error.textContent = requestError.message; button.disabled = false; }
 }
@@ -1559,7 +1618,7 @@ return `<option value="">默认 TLS</option>${currentTlsProfiles.map(profile => 
 function openAccountImportModal() {
 openModal("导入账号备份", `<form id="account-import-form">
   <div class="sensitive-notice"><strong>敏感数据</strong><span>备份文件包含上游密钥、OAuth Token 和代理密码。仅导入可信文件，完成后妥善保管或删除文件。</span></div>
-  <div class="field"><label for="account-import-files">JSON 备份文件</label><input id="account-import-files" name="files" type="file" accept="application/json,.json" multiple required><span class="field-hint">支持原版 sub2api-data / sub2api-bundle v1，可一次选择多个文件；Mini 仅导入 OpenAI API Key 与 Codex OAuth 账号。</span></div>
+  <div class="field"><label for="account-import-files">JSON 备份文件</label><input id="account-import-files" name="files" type="file" accept="application/json,.json" multiple required><span class="field-hint">支持原版 sub2api-data / sub2api-bundle v1，可一次选择多个文件，并按五平台账号类型校验凭据。</span></div>
   <div id="account-import-result" class="import-result" hidden></div>
   <p class="form-error" id="account-import-error"></p>
 </form>`, `<button class="button secondary" data-close-modal>关闭</button><button class="button" id="save-account-import">导入</button>`);

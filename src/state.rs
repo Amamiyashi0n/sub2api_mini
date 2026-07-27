@@ -350,7 +350,7 @@ impl Scheduler {
              accounts.created_at, accounts.updated_at FROM accounts \
              LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
              LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
-             WHERE accounts.enabled = 1 AND accounts.platform = ? AND (accounts.proxy_id IS NULL OR \
+             WHERE accounts.enabled = 1 AND (accounts.proxy_id IS NULL OR \
              (proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
              datetime(proxies.expires_at) > CURRENT_TIMESTAMP)) OR proxies.fallback_mode = 'direct' OR \
              (proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
@@ -360,11 +360,28 @@ impl Scheduler {
              WHERE account_groups.account_id = accounts.id AND account_groups.group_id = ?)) \
              ORDER BY accounts.priority ASC, accounts.id ASC",
         )
-        .bind(platform)
         .bind(group_id)
         .bind(group_id)
         .fetch_all(&state.pool)
         .await?;
+        let rows = rows
+            .into_iter()
+            .filter(|row| match platform {
+                "openai_responses" => matches!(row.platform.as_str(), "openai" | "grok"),
+                "openai_chat" | "openai_models" => {
+                    matches!(row.platform.as_str(), "openai" | "grok")
+                        || (row.platform == "gemini" && row.account_type == "api_key")
+                        || (platform == "openai_models"
+                            && row.platform == "antigravity"
+                            && row.account_type == "upstream")
+                }
+                "anthropic_messages" => {
+                    row.platform == "anthropic"
+                        || (row.platform == "antigravity" && row.account_type == "upstream")
+                }
+                value => row.platform == value,
+            })
+            .collect::<Vec<_>>();
 
         let mut priorities = Vec::new();
         for row in &rows {

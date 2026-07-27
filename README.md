@@ -1,6 +1,6 @@
 # Sub2API Mini
 
-Single-process Rust/Axum multi-user gateway for Anthropic Claude and OpenAI with SQLite and an embedded console.
+Single-process Rust/Axum multi-user AI gateway with SQLite and an embedded console.
 
 ## Endpoints
 
@@ -27,4 +27,14 @@ cargo run
 Runtime configuration is loaded directly from `/data/sub2api_mini/.env`. The UI is embedded in the Rust binary, so UI changes require a rebuild. Credentials are encrypted with `SUB2API_MINI_MASTER_KEY`; changing that key makes existing upstream credentials unreadable.
 
 The administrator creates and disables users. Each user has an isolated session, API keys, dashboard, and usage history. Upstream accounts remain administrator-managed and shared by the gateway scheduler.
-User authentication is local username/email and password only. Administrator-managed upstream accounts support Claude Code OAuth/Setup Token, Anthropic API keys, OpenAI/Codex OAuth, and OpenAI API keys.
+User authentication is local username/email and password only. The account console follows the original five-platform matrix:
+
+- Anthropic: Claude Code OAuth/Setup Token, Claude Console API Key, AWS Bedrock, and Vertex Service Account.
+- OpenAI: Codex OAuth and API Key.
+- Gemini: Gemini CLI OAuth, AI Studio API Key, and Vertex Service Account.
+- Antigravity: OAuth and Anthropic-compatible Upstream API Key.
+- Grok: xAI OAuth and API Key.
+
+Native gateway coverage is intentionally narrower than the original distributed backend. Anthropic direct/OAuth supports Messages and token counting; Bedrock and Vertex support non-streaming Messages; Antigravity Upstream supports Messages. OpenAI and Grok support Responses, Chat Completions, and Models. Gemini API Key supports Chat Completions and Models through Google's OpenAI-compatible endpoint. Gemini, Antigravity, and Grok OAuth tokens use provider-specific refresh endpoints; the two Google native OAuth inference protocols are stored and synchronized but are not yet gateway targets.
+
+Third-party OAuth Client IDs and secrets are never built into the binary. Store them per account during token import, or set `SUB2API_MINI_GEMINI_OAUTH_CLIENT_ID`, `SUB2API_MINI_GEMINI_OAUTH_CLIENT_SECRET`, `SUB2API_MINI_ANTIGRAVITY_OAUTH_CLIENT_ID`, `SUB2API_MINI_ANTIGRAVITY_OAUTH_CLIENT_SECRET`, and `SUB2API_MINI_GROK_OAUTH_CLIENT_ID` in the runtime environment as needed.

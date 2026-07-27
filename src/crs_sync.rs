@@ -68,9 +68,9 @@ struct ExportData {
     #[serde(default)]
     claude_console_accounts: Vec<CrsAccount>,
     #[serde(default, rename = "geminiOAuthAccounts")]
-    gemini_oauth_accounts: Vec<Value>,
+    gemini_oauth_accounts: Vec<CrsAccount>,
     #[serde(default, rename = "geminiApiKeyAccounts")]
-    gemini_api_key_accounts: Vec<Value>,
+    gemini_api_key_accounts: Vec<CrsAccount>,
 }
 
 impl ExportData {
@@ -79,8 +79,6 @@ impl ExportData {
             .iter()
             .filter(|account| claude_account_type(account).is_none())
             .count()
-            + self.gemini_oauth_accounts.len()
-            + self.gemini_api_key_accounts.len()
     }
 
     fn supported(&self) -> Vec<CrsTarget<'_>> {
@@ -88,7 +86,9 @@ impl ExportData {
             self.claude_accounts.len()
                 + self.claude_console_accounts.len()
                 + self.open_ai_oauth_accounts.len()
-                + self.open_ai_responses_accounts.len(),
+                + self.open_ai_responses_accounts.len()
+                + self.gemini_oauth_accounts.len()
+                + self.gemini_api_key_accounts.len(),
         );
         targets.extend(self.claude_accounts.iter().filter_map(|account| {
             claude_account_type(account).map(|account_type| CrsTarget {
@@ -120,6 +120,22 @@ impl ExportData {
                 .map(|account| CrsTarget {
                     account,
                     platform: "openai",
+                    kind: "api_key",
+                    account_type: "api_key",
+                }),
+        );
+        targets.extend(self.gemini_oauth_accounts.iter().map(|account| CrsTarget {
+            account,
+            platform: "gemini",
+            kind: "oauth",
+            account_type: "oauth",
+        }));
+        targets.extend(
+            self.gemini_api_key_accounts
+                .iter()
+                .map(|account| CrsTarget {
+                    account,
+                    platform: "gemini",
                     kind: "api_key",
                     account_type: "api_key",
                 }),
@@ -495,6 +511,27 @@ fn credentials_from_crs(
             .filter(|value| !value.is_empty())
             .map(str::to_string)
     };
+    for (key, value) in &source.credentials {
+        if !matches!(
+            key.as_str(),
+            "api_key"
+                | "access_token"
+                | "refresh_token"
+                | "id_token"
+                | "email"
+                | "chatgpt_account_id"
+                | "account_id"
+                | "client_id"
+                | "token_type"
+                | "scope"
+                | "expires_at"
+                | "org_uuid"
+                | "account_uuid"
+                | "base_url"
+        ) {
+            credentials.provider.insert(key.clone(), value.clone());
+        }
+    }
     if target.kind == "api_key" {
         credentials.api_key = string("api_key").or(credentials.api_key);
         if credentials.api_key.is_none() {
@@ -846,7 +883,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn previews_and_syncs_claude_and_openai_account_matrix() {
+    async fn previews_and_syncs_claude_openai_and_gemini_account_matrix() {
         let upstream = Router::new()
             .route(
                 "/web/auth/login",
@@ -884,7 +921,16 @@ mod tests {
                             "isActive": true, "schedulable": true, "priority": 18,
                             "credentials": {"access_token": "openai-access"}
                         }],
-                        "geminiOAuthAccounts": [{"id": "gemini-1"}]
+                        "geminiOAuthAccounts": [{
+                            "kind": "gemini-oauth", "id": "gemini-oauth", "name": "Gemini OAuth",
+                            "isActive": true, "schedulable": true, "priority": 20,
+                            "credentials": {"access_token": "gemini-access", "refresh_token": "gemini-refresh", "project_id": "gemini-project"}
+                        }],
+                        "geminiApiKeyAccounts": [{
+                            "kind": "gemini-apikey", "id": "gemini-key", "name": "Gemini API Key",
+                            "isActive": true, "schedulable": true, "priority": 22,
+                            "credentials": {"api_key": "gemini-secret"}
+                        }]
                     }}))
                 }),
             );
@@ -921,6 +967,8 @@ mod tests {
                 "claude-setup".into(),
                 "claude-key".into(),
                 "openai-oauth".into(),
+                "gemini-oauth".into(),
+                "gemini-key".into(),
             ],
         };
         let Json(previewed) = preview(State(state.clone()), Json(input.clone()))
@@ -948,13 +996,14 @@ mod tests {
             previewed
                 .pointer("/data/unsupported_count")
                 .and_then(Value::as_u64),
-            Some(2)
+            Some(1)
         );
 
         let Json(result) = sync(State(state.clone()), Json(input)).await.unwrap();
         assert_eq!(
             result.pointer("/data/created").and_then(Value::as_i64),
-            Some(3)
+            Some(5),
+            "{result}"
         );
         assert_eq!(
             result.pointer("/data/updated").and_then(Value::as_i64),
@@ -962,7 +1011,7 @@ mod tests {
         );
         assert_eq!(
             result.pointer("/data/skipped").and_then(Value::as_i64),
-            Some(2)
+            Some(1)
         );
         let rows: Vec<(String, String, String, String, String, i32)> = sqlx::query_as(
             "SELECT crs_account_id, platform, kind, account_type, base_url, concurrency \
@@ -999,6 +1048,22 @@ mod tests {
                     3,
                 ),
                 (
+                    "gemini-key".into(),
+                    "gemini".into(),
+                    "api_key".into(),
+                    "api_key".into(),
+                    "https://generativelanguage.googleapis.com".into(),
+                    3,
+                ),
+                (
+                    "gemini-oauth".into(),
+                    "gemini".into(),
+                    "oauth".into(),
+                    "oauth".into(),
+                    "https://cloudcode-pa.googleapis.com".into(),
+                    3,
+                ),
+                (
                     "openai-oauth".into(),
                     "openai".into(),
                     "oauth".into(),
@@ -1027,6 +1092,16 @@ mod tests {
         assert_eq!(credentials.email.as_deref(), Some("preserved@example.com"));
         assert_eq!(credentials.org_uuid.as_deref(), Some("org-1"));
         assert_eq!(credentials.account_uuid.as_deref(), Some("account-1"));
+        let gemini_encrypted: String = sqlx::query_scalar(
+            "SELECT encrypted_credentials FROM accounts WHERE crs_account_id = 'gemini-oauth'",
+        )
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        let gemini: Credentials =
+            serde_json::from_slice(&state.crypto.decrypt(&gemini_encrypted).unwrap()).unwrap();
+        assert_eq!(gemini.refresh_token.as_deref(), Some("gemini-refresh"));
+        assert_eq!(gemini.provider_str("project_id"), Some("gemini-project"));
         server.abort();
     }
 }

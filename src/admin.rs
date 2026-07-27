@@ -6,7 +6,7 @@ use axum::{
     routing::{get, post, put},
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::{
     auth::{self, AuthSession},
@@ -442,7 +442,10 @@ struct CreateAccountInput {
     account_type: String,
     #[serde(default)]
     base_url: String,
+    #[serde(default)]
     api_key: String,
+    #[serde(default)]
+    credentials: Map<String, Value>,
     #[serde(default = "default_priority")]
     priority: i32,
     #[serde(default = "default_concurrency")]
@@ -475,41 +478,45 @@ async fn create_account(
     State(state): State<AppState>,
     Json(input): Json<CreateAccountInput>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    if input.kind != "api_key" || input.account_type != "api_key" {
-        return Err(ApiError::bad_request(
-            "INVALID_ACCOUNT_KIND",
-            "OAuth accounts must be created through OAuth import or PKCE",
-        ));
-    }
     validate_account_fields(&input.name, input.priority, input.concurrency)?;
-    if input.api_key.trim().is_empty() {
-        return Err(ApiError::bad_request(
-            "API_KEY_REQUIRED",
-            "api_key is required",
-        ));
+    let platform = input.platform.trim().to_ascii_lowercase();
+    let (kind, account_type) = normalize_provider_account_type(
+        &platform,
+        if input.account_type.trim().is_empty() {
+            &input.kind
+        } else {
+            &input.account_type
+        },
+    )?;
+    let mut credentials: Credentials = serde_json::from_value(Value::Object(input.credentials))
+        .map_err(|_| ApiError::bad_request("INVALID_CREDENTIALS", "credentials are invalid"))?;
+    if !input.api_key.trim().is_empty() {
+        credentials.api_key = Some(input.api_key.trim().to_string());
     }
-    if !matches!(input.platform.as_str(), "openai" | "anthropic") {
-        return Err(ApiError::bad_request(
-            "INVALID_ACCOUNT_PLATFORM",
-            "platform must be openai or anthropic",
-        ));
-    }
-    let base_url = normalize_account_base_url(&input.base_url, "api_key", &input.platform)?;
+    validate_provider_credentials(&platform, account_type, &mut credentials)?;
+    let default_base = provider_default_base_url(&platform, account_type, &credentials)?;
+    let base_url = normalize_account_base_url(
+        if input.base_url.trim().is_empty() {
+            &default_base
+        } else {
+            &input.base_url
+        },
+        kind,
+        &platform,
+    )?;
     validate_proxy_id(&state, input.proxy_id).await?;
     validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
     validate_notes(&input.notes)?;
-    let credentials = Credentials {
-        api_key: Some(input.api_key.trim().to_string()),
-        ..Default::default()
-    };
     let encrypted = encrypt_credentials(&state, &credentials)?;
     let result = sqlx::query(
         "INSERT INTO accounts (name, kind, platform, account_type, base_url, encrypted_credentials, \
          priority, concurrency, proxy_id, notes, tls_fingerprint_profile_id) \
-         VALUES (?, 'api_key', ?, 'api_key', ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(input.name.trim())
-    .bind(&input.platform)
+    .bind(kind)
+    .bind(&platform)
+    .bind(account_type)
     .bind(base_url)
     .bind(encrypted)
     .bind(input.priority)
@@ -523,6 +530,191 @@ async fn create_account(
         StatusCode::CREATED,
         Json(json!({"data": {"id": result.last_insert_rowid()}})),
     ))
+}
+
+pub(crate) fn normalize_provider_account_type(
+    platform: &str,
+    raw_type: &str,
+) -> ApiResult<(&'static str, &'static str)> {
+    let account_type = raw_type.trim().to_ascii_lowercase().replace('-', "_");
+    let normalized = match (platform, account_type.as_str()) {
+        ("anthropic", "oauth") => ("oauth", "oauth"),
+        ("anthropic", "setup_token") => ("oauth", "setup_token"),
+        ("anthropic", "apikey" | "api_key") => ("api_key", "api_key"),
+        ("anthropic", "bedrock") => ("bedrock", "bedrock"),
+        ("anthropic", "service_account") => ("service_account", "service_account"),
+        ("openai", "oauth") => ("oauth", "oauth"),
+        ("openai", "apikey" | "api_key") => ("api_key", "api_key"),
+        ("gemini", "oauth") => ("oauth", "oauth"),
+        ("gemini", "apikey" | "api_key") => ("api_key", "api_key"),
+        ("gemini", "service_account") => ("service_account", "service_account"),
+        ("antigravity", "oauth") => ("oauth", "oauth"),
+        ("antigravity", "upstream" | "apikey" | "api_key") => ("api_key", "upstream"),
+        ("grok", "oauth") => ("oauth", "oauth"),
+        ("grok", "apikey" | "api_key") => ("api_key", "api_key"),
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_ACCOUNT_TYPE",
+                "account type is not supported by the selected platform",
+            ));
+        }
+    };
+    Ok(normalized)
+}
+
+pub(crate) fn validate_provider_credentials(
+    platform: &str,
+    account_type: &str,
+    credentials: &mut Credentials,
+) -> ApiResult<()> {
+    let missing_api_key = credentials
+        .api_key
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty());
+    match account_type {
+        "api_key" | "upstream" if missing_api_key => {
+            return Err(ApiError::bad_request(
+                "API_KEY_REQUIRED",
+                "api_key is required",
+            ));
+        }
+        "oauth" | "setup_token"
+            if credentials
+                .access_token
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+                && credentials
+                    .refresh_token
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty()) =>
+        {
+            return Err(ApiError::bad_request(
+                "OAUTH_TOKEN_REQUIRED",
+                "access_token or refresh_token is required",
+            ));
+        }
+        "bedrock" => {
+            let auth_mode = credentials.provider_str("auth_mode").unwrap_or("sigv4");
+            if auth_mode == "api_key" {
+                if missing_api_key {
+                    return Err(ApiError::bad_request(
+                        "BEDROCK_API_KEY_REQUIRED",
+                        "Bedrock API key is required",
+                    ));
+                }
+            } else if credentials.provider_str("aws_access_key_id").is_none()
+                || credentials.provider_str("aws_secret_access_key").is_none()
+            {
+                return Err(ApiError::bad_request(
+                    "BEDROCK_AWS_CREDENTIALS_REQUIRED",
+                    "AWS access key id and secret access key are required",
+                ));
+            }
+            credentials
+                .provider
+                .entry("auth_mode")
+                .or_insert_with(|| Value::String("sigv4".into()));
+            credentials
+                .provider
+                .entry("region")
+                .or_insert_with(|| Value::String("us-east-1".into()));
+        }
+        "service_account" => {
+            let raw = credentials
+                .provider_str("service_account_json")
+                .ok_or_else(|| {
+                    ApiError::bad_request(
+                        "SERVICE_ACCOUNT_REQUIRED",
+                        "service_account_json is required",
+                    )
+                })?;
+            let document: Value = serde_json::from_str(raw).map_err(|_| {
+                ApiError::bad_request("INVALID_SERVICE_ACCOUNT", "service account JSON is invalid")
+            })?;
+            if document.get("type").and_then(Value::as_str) != Some("service_account") {
+                return Err(ApiError::bad_request(
+                    "INVALID_SERVICE_ACCOUNT",
+                    "service account JSON has an invalid type",
+                ));
+            }
+            for field in ["project_id", "client_email", "private_key", "token_uri"] {
+                if document
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Err(ApiError::bad_request(
+                        "INVALID_SERVICE_ACCOUNT",
+                        format!("service account JSON is missing {field}"),
+                    ));
+                }
+            }
+            if platform == "gemini" || platform == "anthropic" {
+                let project = document["project_id"].as_str().unwrap().to_string();
+                credentials
+                    .provider
+                    .entry("project_id")
+                    .or_insert(Value::String(project));
+                credentials
+                    .provider
+                    .entry("location")
+                    .or_insert_with(|| Value::String("us-central1".into()));
+            }
+        }
+        _ => {}
+    }
+    credentials.api_key = credentials
+        .api_key
+        .take()
+        .map(|value| value.trim().to_string());
+    Ok(())
+}
+
+pub(crate) fn provider_default_base_url(
+    platform: &str,
+    account_type: &str,
+    credentials: &Credentials,
+) -> ApiResult<String> {
+    if account_type == "bedrock" {
+        let region = credentials.provider_str("region").unwrap_or("us-east-1");
+        validate_provider_segment(region, "AWS region")?;
+        return Ok(format!("https://bedrock-runtime.{region}.amazonaws.com"));
+    }
+    if account_type == "service_account" {
+        let location = credentials
+            .provider_str("location")
+            .unwrap_or("us-central1");
+        validate_provider_segment(location, "Vertex location")?;
+        return Ok(if location == "global" {
+            "https://aiplatform.googleapis.com".into()
+        } else {
+            format!("https://{location}-aiplatform.googleapis.com")
+        });
+    }
+    normalize_account_base_url(
+        "",
+        if account_type == "oauth" {
+            "oauth"
+        } else {
+            "api_key"
+        },
+        platform,
+    )
+}
+
+fn validate_provider_segment(value: &str, label: &str) -> ApiResult<()> {
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(ApiError::bad_request(
+            "INVALID_PROVIDER_REGION",
+            format!("{label} is invalid"),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -1645,6 +1837,109 @@ mod tests {
         .await
         .unwrap()
         .last_insert_rowid()
+    }
+
+    #[test]
+    fn provider_account_matrix_matches_supported_platforms() {
+        let cases = [
+            ("anthropic", "oauth", ("oauth", "oauth")),
+            ("anthropic", "setup-token", ("oauth", "setup_token")),
+            ("anthropic", "bedrock", ("bedrock", "bedrock")),
+            (
+                "anthropic",
+                "service_account",
+                ("service_account", "service_account"),
+            ),
+            ("openai", "api_key", ("api_key", "api_key")),
+            ("gemini", "oauth", ("oauth", "oauth")),
+            (
+                "gemini",
+                "service_account",
+                ("service_account", "service_account"),
+            ),
+            ("antigravity", "upstream", ("api_key", "upstream")),
+            ("grok", "oauth", ("oauth", "oauth")),
+        ];
+        for (platform, account_type, expected) in cases {
+            assert_eq!(
+                normalize_provider_account_type(platform, account_type).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            normalize_provider_account_type("grok", "bedrock")
+                .unwrap_err()
+                .code,
+            "INVALID_ACCOUNT_TYPE"
+        );
+    }
+
+    #[tokio::test]
+    async fn creates_bedrock_account_with_encrypted_provider_credentials() {
+        let (_directory, state) = test_support::state().await;
+        let credentials = Map::from_iter([
+            ("auth_mode".into(), Value::String("sigv4".into())),
+            ("region".into(), Value::String("eu-west-1".into())),
+            (
+                "aws_access_key_id".into(),
+                Value::String("AKIDEXAMPLE".into()),
+            ),
+            (
+                "aws_secret_access_key".into(),
+                Value::String("bedrock-secret".into()),
+            ),
+        ]);
+        let (status, Json(value)) = create_account(
+            State(state.clone()),
+            Json(CreateAccountInput {
+                name: "Bedrock EU".into(),
+                kind: "bedrock".into(),
+                platform: "anthropic".into(),
+                account_type: "bedrock".into(),
+                base_url: String::new(),
+                api_key: String::new(),
+                credentials,
+                priority: 20,
+                concurrency: 4,
+                proxy_id: None,
+                notes: "regional".into(),
+                tls_fingerprint_profile_id: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let id = value["data"]["id"].as_i64().unwrap();
+        let row: (String, String, String, String, String) = sqlx::query_as(
+            "SELECT kind, platform, account_type, base_url, encrypted_credentials \
+             FROM accounts WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (
+                row.0.as_str(),
+                row.1.as_str(),
+                row.2.as_str(),
+                row.3.as_str()
+            ),
+            (
+                "bedrock",
+                "anthropic",
+                "bedrock",
+                "https://bedrock-runtime.eu-west-1.amazonaws.com",
+            )
+        );
+        assert!(!row.4.contains("bedrock-secret"));
+        let stored: Credentials =
+            serde_json::from_slice(&state.crypto.decrypt(&row.4).unwrap()).unwrap();
+        assert_eq!(stored.provider_str("region"), Some("eu-west-1"));
+        assert_eq!(
+            stored.provider_str("aws_secret_access_key"),
+            Some("bedrock-secret")
+        );
     }
 
     #[tokio::test]
