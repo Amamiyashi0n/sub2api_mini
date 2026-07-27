@@ -941,26 +941,31 @@ tbody tr:hover { background: #fafbf9; }
 .modal-body { max-height: calc(100vh - 180px); overflow-y: auto; padding: 22px; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 15px 22px; background: #f8f9f7; border-top: 1px solid var(--line); }
 .modal.user-detail-modal { width: min(1080px, calc(100% - 28px)); }
-.modal.account-create-modal { width: min(920px, calc(100% - 32px)); max-height: calc(100vh - 40px); }
-.account-create-modal .modal-header { padding: 20px 24px; }
-.account-create-modal .modal-header h2 { font-size: 1.16rem; }
-.account-create-modal .modal-body { min-height: 420px; max-height: calc(100vh - 166px); padding: 22px 24px 26px; }
-.account-create-modal .modal-footer { padding: 14px 24px; }
-.account-create-modal .modal-footer .button { min-width: 92px; }
-.account-create-steps { display: flex; justify-content: center; align-items: center; gap: 12px; margin: 0 0 24px; color: var(--muted); }
-.account-create-steps > div { display: flex; align-items: center; gap: 10px; }
-.account-create-steps span { display: grid; width: 34px; height: 34px; place-items: center; color: var(--muted); background: var(--surface-soft); border-radius: 50%; font-weight: 700; }
-.account-create-steps strong { font-size: .95rem; font-weight: 650; }
-.account-create-steps i { width: 42px; height: 2px; background: var(--line-strong); }
+.modal.account-create-modal { width: min(736px, calc(100% - 32px)); max-height: calc(80vh - 32px); }
+.account-create-modal .modal-header { padding: 16px 19px; }
+.account-create-modal .modal-header h2 { font-size: .98rem; }
+.account-create-modal .modal-close { width: 28px; height: 28px; font-size: 1.2rem; }
+.account-create-modal .modal-body { min-height: 336px; max-height: calc(80vh - 133px); padding: 18px 19px 21px; }
+.account-create-modal .modal-footer { padding: 11px 19px; }
+.account-create-modal .modal-footer .button { min-width: 74px; min-height: 32px; padding: 6px 11px; }
+.account-create-modal .field { gap: 6px; margin-bottom: 14px; }
+.account-create-modal .field label { font-size: .75rem; }
+.account-create-modal .field input, .account-create-modal .field select, .account-create-modal .field textarea { min-height: 32px; padding: 6px 8px; border-radius: 6px; }
+.account-create-modal .field-hint { font-size: .68rem; }
+.account-create-steps { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 0 0 19px; color: var(--muted); }
+.account-create-steps > div { display: flex; align-items: center; gap: 8px; }
+.account-create-steps span { display: grid; width: 27px; height: 27px; place-items: center; color: var(--muted); background: var(--surface-soft); border-radius: 50%; font-size: .78rem; font-weight: 700; }
+.account-create-steps strong { font-size: .82rem; font-weight: 650; }
+.account-create-steps i { width: 34px; height: 2px; background: var(--line-strong); }
 .account-create-steps .active { color: var(--ink); }
 .account-create-steps .active span { color: white; background: #12b8a6; }
-.account-create-form { display: grid; gap: 6px; }
-.account-create-form > .field { margin-bottom: 14px; }
-.account-create-form > .field > label, .account-create-section > label { display: block; margin-bottom: 9px; color: var(--ink); font-size: .88rem; font-weight: 650; }
-.account-create-form textarea { min-height: 78px; }
-.account-create-section { margin-bottom: 16px; }
-.account-create-platforms { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 5px; background: var(--surface-soft); border-radius: 8px; }
-.account-create-platforms button { display: flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; color: var(--muted); background: transparent; border: 0; border-radius: 6px; font-size: .94rem; font-weight: 650; }
+.account-create-form { display: grid; gap: 5px; }
+.account-create-form > .field { margin-bottom: 11px; }
+.account-create-form > .field > label, .account-create-section > label { display: block; margin-bottom: 7px; color: var(--ink); font-size: .8rem; font-weight: 650; }
+.account-create-form textarea { min-height: 62px; }
+.account-create-section { margin-bottom: 13px; }
+.account-create-platforms { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; padding: 4px; background: var(--surface-soft); border-radius: 6px; }
+.account-create-platforms button { display: flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; color: var(--muted); background: transparent; border: 0; border-radius: 5px; font-size: .82rem; font-weight: 650; }
 .account-create-platforms button:hover { color: var(--ink); }
 .account-create-platforms button.selected { color: var(--green-strong); background: var(--surface); box-shadow: 0 1px 3px rgb(0 0 0 / 10%); }
 .account-create-platforms button.selected.anthropic { color: #e85d0f; }
@@ -968,11 +973,11 @@ tbody tr:hover { background: #fafbf9; }
 .account-create-platforms button.selected.gemini { color: #2563eb; }
 .account-create-platforms button.selected.antigravity { color: #7c3aed; }
 .account-create-platforms button.selected.grok { color: #111827; }
-.account-create-platforms .app-icon { width: 19px; height: 19px; }
-.account-create-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.account-create-platforms .app-icon { width: 15px; height: 15px; }
+.account-create-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .account-create-types.count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .account-create-types.count-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.account-create-type { display: flex; min-height: 72px; align-items: center; gap: 12px; padding: 11px 14px; text-align: left; color: var(--ink); background: var(--surface); border: 2px solid var(--line); border-radius: 8px; }
+.account-create-type { display: flex; min-height: 58px; align-items: center; gap: 10px; padding: 9px 11px; text-align: left; color: var(--ink); background: var(--surface); border: 2px solid var(--line); border-radius: 6px; }
 .account-create-type:hover { border-color: var(--line-strong); }
 .account-create-type.selected { border-color: #8b5cf6; background: #faf7ff; }
 .account-create-type.selected.anthropic { border-color: #f97316; background: #fff8f1; }
@@ -980,45 +985,46 @@ tbody tr:hover { background: #fafbf9; }
 .account-create-type.selected.gemini { border-color: #4285f4; background: #f3f7ff; }
 .account-create-type.selected.antigravity { border-color: #8b5cf6; background: #faf7ff; }
 .account-create-type.selected.grok { border-color: #111827; background: #f5f6f7; }
-.account-create-type-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; color: var(--muted); background: var(--surface-soft); border-radius: 8px; }
+.account-create-type-icon { display: grid; width: 29px; height: 29px; flex: 0 0 auto; place-items: center; color: var(--muted); background: var(--surface-soft); border-radius: 6px; }
 .account-create-type.selected .account-create-type-icon { color: white; background: #8b5cf6; }
 .account-create-type.selected.anthropic .account-create-type-icon { background: #f97316; }
 .account-create-type.selected.openai .account-create-type-icon { background: #10b981; }
 .account-create-type.selected.gemini .account-create-type-icon { background: #4285f4; }
 .account-create-type.selected.antigravity .account-create-type-icon { background: #8b5cf6; }
 .account-create-type.selected.grok .account-create-type-icon { background: #111827; }
-.account-create-type-icon .app-icon { width: 20px; height: 20px; }
+.account-create-type-icon .app-icon { width: 16px; height: 16px; }
 .account-create-type strong, .account-create-type small { display: block; }
-.account-create-type strong { margin-bottom: 4px; font-size: .94rem; }
-.account-create-type small { color: var(--muted); font-size: .78rem; }
-.account-create-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.account-create-methods button { display: grid; grid-template-columns: 32px 1fr; align-items: center; column-gap: 9px; padding: 11px 13px; text-align: left; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.account-create-type strong { margin-bottom: 3px; font-size: .84rem; }
+.account-create-type small { color: var(--muted); font-size: .7rem; }
+.account-create-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.account-create-methods button { display: grid; grid-template-columns: 26px 1fr; align-items: center; column-gap: 7px; padding: 9px 10px; text-align: left; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
 .account-create-methods button > span { grid-row: 1 / 3; }
 .account-create-methods button strong, .account-create-methods button small { display: block; }
-.account-create-methods button small { color: var(--muted); }
+.account-create-methods button strong { font-size: .84rem; }
+.account-create-methods button small { color: var(--muted); font-size: .7rem; }
 .account-create-methods button.selected { border-color: #12b8a6; box-shadow: 0 0 0 1px #12b8a6; }
-.account-create-credentials { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
-.account-create-provider-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.account-create-credentials { display: grid; grid-template-columns: 1.2fr 1fr; gap: 11px; }
+.account-create-provider-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .account-create-provider-fields .provider-span { grid-column: 1 / -1; }
-.account-create-provider-fields textarea { min-height: 118px; font-family: "IBM Plex Mono", "Noto Sans Mono", monospace; }
-.account-create-advanced { margin-top: 2px; padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; }
-.account-create-advanced summary { cursor: pointer; color: var(--muted); font-size: .84rem; font-weight: 650; }
-.account-create-advanced[open] summary { margin-bottom: 14px; }
-.account-auth-panel { max-width: 640px; margin: 6px auto; text-align: center; }
-.account-auth-panel h3 { margin: 12px 0 8px; font-size: 1.12rem; }
-.account-auth-panel > p { margin: 0 auto 18px; max-width: 560px; color: var(--muted); line-height: 1.65; }
-.account-auth-panel > .button { margin-bottom: 15px; }
-.account-auth-mark { display: grid; width: 54px; height: 54px; margin: 0 auto; place-items: center; color: white; border-radius: 8px; }
+.account-create-provider-fields textarea { min-height: 94px; font-family: "IBM Plex Mono", "Noto Sans Mono", monospace; }
+.account-create-advanced { margin-top: 2px; padding: 10px 11px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 6px; }
+.account-create-advanced summary { cursor: pointer; color: var(--muted); font-size: .76rem; font-weight: 650; }
+.account-create-advanced[open] summary { margin-bottom: 11px; }
+.account-auth-panel { max-width: 512px; margin: 5px auto; text-align: center; }
+.account-auth-panel h3 { margin: 10px 0 6px; font-size: .98rem; }
+.account-auth-panel > p { margin: 0 auto 14px; max-width: 448px; color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.account-auth-panel > .button { min-height: 32px; margin-bottom: 12px; padding: 6px 11px; }
+.account-auth-mark { display: grid; width: 43px; height: 43px; margin: 0 auto; place-items: center; color: white; border-radius: 6px; }
 .account-auth-mark.anthropic { background: #f97316; }
 .account-auth-mark.openai { background: #10b981; }
 .account-auth-mark.gemini { background: #4285f4; }
 .account-auth-mark.antigravity { background: #8b5cf6; }
 .account-auth-mark.grok { background: #111827; }
-.account-auth-mark .app-icon { width: 26px; height: 26px; }
-.account-auth-ready { display: block; margin-bottom: 18px; color: var(--green-strong); font-size: .8rem; }
-.account-auth-panel .field { margin-top: 14px; text-align: left; }
-.account-auth-panel textarea { min-height: 132px; font-family: "IBM Plex Mono", "Noto Sans Mono", monospace; }
-.account-auth-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; color: var(--muted); font-size: .78rem; }
+.account-auth-mark .app-icon { width: 21px; height: 21px; }
+.account-auth-ready { display: block; margin-bottom: 14px; color: var(--green-strong); font-size: .72rem; }
+.account-auth-panel .field { margin-top: 11px; text-align: left; }
+.account-auth-panel textarea { min-height: 106px; font-family: "IBM Plex Mono", "Noto Sans Mono", monospace; }
+.account-auth-divider { display: flex; align-items: center; gap: 10px; margin: 3px 0 13px; color: var(--muted); font-size: .7rem; }
 .account-auth-divider::before, .account-auth-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
 .account-platform-badge.anthropic { color: #c2410c; background: #fff3e9; border-color: #fed7aa; }
 .account-platform-badge.gemini { color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }
@@ -1110,8 +1116,14 @@ tbody tr:hover { background: #fafbf9; }
   .form-grid { grid-template-columns: 1fr; }
   .modal.account-create-modal { width: calc(100% - 20px); max-height: calc(100dvh - 20px); }
   .account-create-modal .modal-header { padding: 18px; }
+  .account-create-modal .modal-header h2 { font-size: 1.16rem; }
+  .account-create-modal .modal-close { width: 34px; height: 34px; font-size: 1.45rem; }
   .account-create-modal .modal-body { min-height: 0; max-height: calc(100dvh - 150px); padding: 20px 18px; }
   .account-create-modal .modal-footer { padding: 13px 18px; }
+  .account-create-modal .modal-footer .button { min-width: 92px; min-height: 38px; padding: 8px 14px; }
+  .account-create-modal .field input, .account-create-modal .field select, .account-create-modal .field textarea { min-height: 40px; padding: 8px 10px; }
+  .account-create-modal .field label { font-size: .82rem; }
+  .account-create-modal .field-hint { font-size: .76rem; }
   .account-create-steps { gap: 8px; margin-bottom: 22px; }
   .account-create-steps i { width: 20px; }
   .account-create-steps span { width: 32px; height: 32px; }
