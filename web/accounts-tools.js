@@ -214,9 +214,18 @@ window.Sub2MiniAccountTools = (() => {
     } catch (error) { modal.querySelector("#tls-profile-error").textContent = error.message || "无法解析 TLS 参数"; }
   }
 
+  let crsSyncState = null;
+
   function openCrsSync() {
     closeAccountToolsMenu();
-    openModal("从 CRS 同步", `<form id="crs-sync-form"><div class="sensitive-notice"><strong>同步规则</strong><span>已存在账号始终更新；新账号可在预览后选择。Mini 只同步 OpenAI OAuth 与 Responses API Key 账号。</span></div><div class="field"><label for="crs-base-url">CRS 地址</label><input id="crs-base-url" name="base_url" type="url" placeholder="http://127.0.0.1:3000" required autofocus></div><div class="form-grid"><div class="field"><label for="crs-username">用户名</label><input id="crs-username" name="username" autocomplete="username" required></div><div class="field"><label for="crs-password">密码</label><input id="crs-password" name="password" type="password" autocomplete="current-password" required></div></div><label class="switch-row"><span><strong>同步代理</strong><small>为 CRS 账号复用或创建网络代理</small></span><input name="sync_proxies" type="checkbox" checked></label><p class="form-error" id="crs-sync-error"></p></form>`, `<button class="button secondary" data-close-modal>取消</button><button class="button" id="preview-crs-sync">预览</button>`);
+    crsSyncState = { base_url: "", username: "", password: "", sync_proxies: true, preview: null, selected: new Set() };
+    renderCrsSyncInput();
+  }
+
+  function renderCrsSyncInput() {
+    const state = crsSyncState;
+    openModal("从 CRS 同步账号", `<form id="crs-sync-form"><p class="crs-sync-description">从 Claude Relay Service 导入账号，并与本地已同步账号保持一致。</p><div class="crs-behavior-note">已有账号只更新 CRS 返回的字段，缺失字段继续保留；凭据按字段合并。关闭同步代理时，已有账号的代理配置保持不变。</div><div class="crs-version-note">需要 CRS v1.1.240 或更高版本。</div><div class="field"><label for="crs-base-url">CRS 地址</label><input id="crs-base-url" name="base_url" type="url" value="${escapeHtml(state.base_url)}" placeholder="http://127.0.0.1:3000" required autofocus></div><div class="form-grid"><div class="field"><label for="crs-username">用户名</label><input id="crs-username" name="username" value="${escapeHtml(state.username)}" autocomplete="username" required></div><div class="field"><label for="crs-password">密码</label><input id="crs-password" name="password" type="password" value="${escapeHtml(state.password)}" autocomplete="current-password" required></div></div><label class="crs-proxy-option"><input name="sync_proxies" type="checkbox" ${state.sync_proxies ? "checked" : ""}><span>同步代理配置</span></label><p class="form-error" id="crs-sync-error"></p></form>`, `<button class="button secondary" data-close-modal>取消</button><button class="button" id="preview-crs-sync">预览</button>`);
+    modal.classList.add("crs-sync-modal");
     modal.querySelector("#preview-crs-sync").addEventListener("click", previewCrsSync);
   }
 
@@ -224,25 +233,53 @@ window.Sub2MiniAccountTools = (() => {
     const form = modal.querySelector("#crs-sync-form");
     if (!form.reportValidity()) return;
     const values = Object.fromEntries(new FormData(form));
-    const request = { base_url: values.base_url, username: values.username, password: values.password, sync_proxies: form.elements.sync_proxies.checked };
+    const request = { base_url: values.base_url.trim(), username: values.username.trim(), password: values.password, sync_proxies: form.elements.sync_proxies.checked };
+    Object.assign(crsSyncState, request);
     event.currentTarget.disabled = true;
     try {
       const result = await api("/api/admin/accounts/sync/crs/preview", { method: "POST", body: JSON.stringify(request) });
       const data = result.data;
       const newRows = data.new_accounts || [];
-      openModal("从 CRS 同步 · 预览", `<form id="crs-preview-form"><div class="import-summary"><span>现有账号 <strong>${data.existing_accounts.length}</strong></span><span>新增账号 <strong>${newRows.length}</strong></span><span>不支持 <strong>${data.unsupported_count || 0}</strong></span></div>${data.existing_accounts.length ? `<section class="crs-preview-section"><h3>将更新的账号</h3>${data.existing_accounts.map(item => `<div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.kind)}</span></div>`).join("")}</section>` : ""}${newRows.length ? `<section class="crs-preview-section"><h3>选择要新增的账号</h3>${newRows.map(item => `<label><input type="checkbox" name="crs_account_id" value="${escapeHtml(item.crs_account_id)}" checked><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.kind)}</small></span></label>`).join("")}</section>` : emptyState("没有新账号", "继续后仍会更新已存在账号")}<p class="form-error" id="crs-sync-error"></p></form>`, `<button class="button secondary" id="back-crs-sync">返回</button><button class="button" id="run-crs-sync">开始同步</button>`);
-      modal.querySelector("#back-crs-sync").addEventListener("click", openCrsSync);
-      modal.querySelector("#run-crs-sync").addEventListener("click", click => runCrsSync(request, click.currentTarget));
+      crsSyncState.preview = data;
+      crsSyncState.selected = new Set(newRows.map(item => item.crs_account_id));
+      renderCrsSyncPreview();
     } catch (error) { modal.querySelector("#crs-sync-error").textContent = error.message; event.currentTarget.disabled = false; }
   }
 
-  async function runCrsSync(request, button) {
-    request.selected_new_account_ids = [...modal.querySelectorAll("[name=crs_account_id]:checked")].map(input => input.value);
+  function crsAccountTypeLabel(item) {
+    const platform = item.platform === "anthropic" ? "Anthropic" : item.platform === "openai" ? "OpenAI" : item.platform;
+    const type = ({ oauth: "OAuth", setup_token: "Setup Token", "setup-token": "Setup Token", api_key: "API Key", apikey: "API Key" })[item.type] || item.type;
+    return `${platform} / ${type}`;
+  }
+
+  function renderCrsSyncPreview() {
+    const data = crsSyncState.preview;
+    const existingRows = data.existing_accounts || [];
+    const newRows = data.new_accounts || [];
+    const row = (item, selectable) => `<label class="crs-account-row ${selectable ? "selectable" : ""}">${selectable ? `<input type="checkbox" name="crs_account_id" value="${escapeHtml(item.crs_account_id)}" ${crsSyncState.selected.has(item.crs_account_id) ? "checked" : ""}>` : ""}<span class="crs-account-badge ${item.platform === "anthropic" ? "anthropic" : ""}">${escapeHtml(crsAccountTypeLabel(item))}</span><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong></label>`;
+    openModal("从 CRS 同步账号", `<div class="crs-preview-content">${existingRows.length ? `<section class="crs-preview-group existing"><div class="crs-preview-heading"><strong>已存在的账号</strong><span>${existingRows.length}</span></div><div class="crs-account-list">${existingRows.map(item => row(item, false)).join("")}</div></section>` : ""}${newRows.length ? `<section class="crs-preview-group"><div class="crs-preview-heading"><strong>新账号</strong><span>${newRows.length}</span><div><button type="button" id="select-all-crs">全选</button><button type="button" id="select-none-crs">取消</button></div></div><div class="crs-account-list">${newRows.map(item => row(item, true)).join("")}</div><small class="crs-selected-count">已选择 ${crsSyncState.selected.size} 个账号</small></section>` : `<div class="crs-no-new">没有新账号。继续同步后将更新 ${existingRows.length} 个已有账号。</div>`}<div class="crs-preview-options"><span>同步代理配置</span><strong class="${crsSyncState.sync_proxies ? "enabled" : ""}">${crsSyncState.sync_proxies ? "是" : "否"}</strong></div>${data.unsupported_count ? `<div class="crs-unsupported-note">另有 ${data.unsupported_count} 个 Mini 不支持的平台或账号类型，已忽略。</div>` : ""}<p class="form-error" id="crs-sync-error"></p></div>`, `<button class="button secondary" id="back-crs-sync">返回</button><button class="button" id="run-crs-sync">开始同步</button>`);
+    modal.classList.add("crs-sync-modal");
+    const updateSelection = () => {
+      crsSyncState.selected = new Set([...modal.querySelectorAll("[name=crs_account_id]:checked")].map(input => input.value));
+      modal.querySelector(".crs-selected-count").textContent = `已选择 ${crsSyncState.selected.size} 个账号`;
+      modal.querySelector("#run-crs-sync").disabled = newRows.length > 0 && crsSyncState.selected.size === 0;
+    };
+    modal.querySelectorAll("[name=crs_account_id]").forEach(input => input.addEventListener("change", updateSelection));
+    modal.querySelector("#select-all-crs")?.addEventListener("click", () => { modal.querySelectorAll("[name=crs_account_id]").forEach(input => { input.checked = true; }); updateSelection(); });
+    modal.querySelector("#select-none-crs")?.addEventListener("click", () => { modal.querySelectorAll("[name=crs_account_id]").forEach(input => { input.checked = false; }); updateSelection(); });
+    modal.querySelector("#back-crs-sync").addEventListener("click", renderCrsSyncInput);
+    modal.querySelector("#run-crs-sync").addEventListener("click", click => runCrsSync(click.currentTarget));
+  }
+
+  async function runCrsSync(button) {
+    const request = { base_url: crsSyncState.base_url, username: crsSyncState.username, password: crsSyncState.password, sync_proxies: crsSyncState.sync_proxies, selected_account_ids: [...crsSyncState.selected] };
     button.disabled = true;
     try {
       const result = await api("/api/admin/accounts/sync/crs", { method: "POST", body: JSON.stringify(request) });
       const data = result.data;
-      openModal("CRS 同步完成", `<div class="import-summary"><span>新增 <strong>${data.created}</strong></span><span>更新 <strong>${data.updated}</strong></span><span>失败 <strong>${data.failed}</strong></span></div>${data.items?.length ? `<div class="import-errors">${data.items.map(item => `<div><strong>${escapeHtml(item.name || item.crs_account_id)}</strong><span>${escapeHtml(item.action)}${item.error ? ` · ${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : ""}`, `<button class="button" id="finish-crs-sync">完成</button>`);
+      const errors = (data.items || []).filter(item => item.action === "failed" || (item.action === "skipped" && item.error !== "not selected"));
+      openModal("从 CRS 同步账号", `<div class="crs-result"><strong>同步结果</strong><p>新增 ${data.created} 个，更新 ${data.updated} 个，跳过 ${data.skipped} 个，失败 ${data.failed} 个。</p>${errors.length ? `<div class="import-errors">${errors.map(item => `<div><strong>${escapeHtml(item.kind || "account")} ${escapeHtml(item.crs_account_id)}</strong><span>${escapeHtml(item.action)}${item.error ? `: ${escapeHtml(item.error)}` : ""}</span></div>`).join("")}</div>` : `<div class="crs-result-success">账号同步已完成，没有需要处理的错误。</div>`}</div>`, `<button class="button secondary" id="finish-crs-sync">关闭</button>`);
+      modal.classList.add("crs-sync-modal");
       modal.querySelector("#finish-crs-sync").addEventListener("click", async () => { closeModal(); await renderRoute(); });
     } catch (error) { modal.querySelector("#crs-sync-error").textContent = error.message; button.disabled = false; }
   }

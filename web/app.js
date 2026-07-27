@@ -901,7 +901,7 @@ page.innerHTML = `
       </div></div>
       <div class="account-tools-dropdown" id="account-tools-dropdown"><button class="button secondary account-tools-toggle" id="account-tools-toggle" type="button" aria-label="更多操作" aria-expanded="false">${appIcon("more")}<span>更多操作</span>${appIcon("chevronDown", "account-tools-chevron")}</button><div class="account-tools-menu" id="account-tools-menu" hidden>
         <section><p>数据操作</p>
-          <button id="sync-crs-accounts" type="button">${appIcon("refresh")}<span><strong>从 CRS 同步</strong><small>预览并同步 OpenAI 账号</small></span></button>
+          <button id="sync-crs-accounts" type="button">${appIcon("refresh")}<span><strong>从 CRS 同步</strong><small>预览并同步 Claude 与 OpenAI 账号</small></span></button>
           <button id="import-accounts" type="button">${appIcon("upload")}<span><strong>导入账号</strong><small>导入 Sub2API JSON 备份</small></span></button>
           <button id="export-accounts" type="button">${appIcon("download")}<span><strong>${selectedAccountIds.size ? "导出选中" : "导出账号"}</strong><small>${selectedAccountIds.size ? `已选择 ${selectedAccountIds.size} 个账号` : "导出含凭证的敏感备份"}</small></span></button>
         </section>

@@ -220,6 +220,10 @@ on port `1455` is retained only for upstream OpenAI/Codex account authorization.
   per-item results, OpenAI API Key/Codex OAuth support and encrypted-at-rest
   credential verification. Unsupported original platforms fail per item without
   rolling back valid entries.
+- Added the original three-step CRS sync workflow with preview selection,
+  existing-account merge updates, optional proxy synchronization and per-item
+  results for Claude OAuth, Claude Setup Token, Claude Console API Key, OpenAI
+  OAuth and OpenAI Responses API Key accounts.
 - Added account multi-selection with transactional bulk scheduling, priority,
   concurrency, proxy and group updates, runtime-state recovery, deletion and
   per-item OAuth refresh results. Manual OAuth refresh now bypasses the normal

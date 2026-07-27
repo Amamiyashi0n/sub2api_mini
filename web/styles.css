@@ -409,6 +409,35 @@ select:focus-visible, textarea:focus-visible {
 .crs-preview-section > div > span, .crs-preview-section > label > span { margin-left: auto; color: var(--muted); font-size: .72rem; }
 .crs-preview-section > label > span { min-width: 0; margin-left: 0; display: grid; }
 .crs-preview-section small { color: var(--muted); font-size: .7rem; }
+.modal.crs-sync-modal { width: min(620px, calc(100% - 28px)); }
+.crs-sync-description { margin: 0 0 12px; color: var(--muted); font-size: .86rem; line-height: 1.55; }
+.crs-behavior-note, .crs-version-note { margin-bottom: 12px; padding: 10px 12px; color: var(--muted); background: var(--surface-soft); border-radius: 6px; font-size: .76rem; line-height: 1.5; }
+.crs-version-note { color: #9a5b12; background: #fff9e9; border: 1px solid #f2dca3; }
+.crs-proxy-option { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: .84rem; }
+.crs-preview-content { display: grid; gap: 15px; }
+.crs-preview-group { display: grid; gap: 8px; }
+.crs-preview-group.existing { padding: 11px 12px; background: var(--surface-soft); border-radius: 6px; }
+.crs-preview-heading { display: flex; align-items: center; gap: 7px; min-height: 26px; }
+.crs-preview-heading > strong { font-size: .84rem; }
+.crs-preview-heading > span { color: var(--muted); font-size: .7rem; }
+.crs-preview-heading > div { display: flex; gap: 10px; margin-left: auto; }
+.crs-preview-heading button { padding: 0; color: var(--green-strong); background: transparent; border: 0; font-size: .72rem; }
+.crs-preview-heading button:last-child { color: var(--muted); }
+.crs-account-list { display: grid; gap: 3px; max-height: 190px; overflow: auto; }
+.crs-account-row { display: flex; min-height: 32px; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: .78rem; }
+.crs-account-row.selectable { cursor: pointer; }
+.crs-account-row.selectable:hover { background: var(--surface-soft); }
+.crs-account-row strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.crs-account-badge { flex: 0 0 auto; padding: 2px 6px; color: #1d4ed8; background: #eff6ff; border-radius: 4px; font-size: .64rem; font-weight: 650; }
+.crs-account-badge.anthropic { color: #c2410c; background: #fff3e9; }
+.crs-selected-count { color: var(--muted); font-size: .7rem; }
+.crs-preview-options { display: flex; gap: 8px; color: var(--muted); font-size: .73rem; }
+.crs-preview-options strong { color: var(--muted); }
+.crs-preview-options strong.enabled { color: var(--green-strong); }
+.crs-no-new, .crs-unsupported-note, .crs-result-success { padding: 12px; color: var(--muted); background: var(--surface-soft); border-radius: 6px; font-size: .8rem; text-align: center; }
+.crs-unsupported-note { padding: 9px 11px; color: #9a5b12; background: #fff9e9; text-align: left; }
+.crs-result { display: grid; gap: 12px; }
+.crs-result > p { margin: 0; color: var(--muted); font-size: .86rem; }
 .key-rate-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 2px; }
 .monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
 .monitor-card { border: 1px solid var(--line); border-radius: 6px; padding: 16px; background: var(--panel); }
@@ -1319,6 +1348,10 @@ html[data-theme="dark"] .rate-pill.peak { color: #fcd34d; background: #33260d; b
 html[data-theme="dark"] .model-cloud code { border-color: #1e5a54; }
 html[data-theme="dark"] .sensitive-notice { color: #fdba74; background: #321f13; border-color: #c2672d; }
 html[data-theme="dark"] .sensitive-notice strong { color: #fb923c; }
+html[data-theme="dark"] .crs-version-note,
+html[data-theme="dark"] .crs-unsupported-note { color: #fcd34d; background: #33260d; border-color: #72551c; }
+html[data-theme="dark"] .crs-account-badge { color: #93c5fd; background: #172554; }
+html[data-theme="dark"] .crs-account-badge.anthropic { color: #fdba74; background: #431f0c; }
 html[data-theme="dark"] .import-errors div { background: #32191d; }
 html[data-theme="dark"] .dashboard-bars > div > div,
 html[data-theme="dark"] .subscription-progress > div,
