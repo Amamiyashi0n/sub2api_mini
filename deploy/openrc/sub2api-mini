@@ -1,0 +1,36 @@
+#!/sbin/openrc-run
+
+description="Sub2API Mini gateway"
+
+: ${app_home:="/home/amamiya/sub2api_mini"}
+: ${command_user:="amamiya:amamiya"}
+: ${supervisor:="supervise-daemon"}
+
+command="${app_home}/bin/sub2api_mini"
+directory="${app_home}"
+command_background=yes
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="${app_home}/log/sub2api-mini.log"
+error_log="${app_home}/log/sub2api-mini.log"
+
+export SUB2API_MINI_ENV_FILE="${app_home}/.env"
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	checkpath -d -m 0700 -o "$command_user" "${app_home}/data" || return 1
+	checkpath -d -m 0750 -o "$command_user" "${app_home}/log" || return 1
+	checkpath -f -m 0640 -o "$command_user" "$output_log" || return 1
+
+	if [ ! -x "$command" ]; then
+		eerror "Sub2API Mini binary is missing or not executable: $command"
+		return 1
+	fi
+	if [ ! -r "${app_home}/.env" ]; then
+		eerror "Sub2API Mini environment file is missing: ${app_home}/.env"
+		return 1
+	fi
+}

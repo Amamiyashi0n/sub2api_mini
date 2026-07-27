@@ -26,6 +26,23 @@ cargo run
 
 Runtime configuration is loaded directly from `/data/sub2api_mini/.env`. The UI is embedded in the Rust binary, so UI changes require a rebuild. Credentials are encrypted with `SUB2API_MINI_MASTER_KEY`; changing that key makes existing upstream credentials unreadable.
 
+## Alpine OpenRC deployment
+
+The files in `deploy/openrc` run a directly installed static binary under the
+unprivileged `amamiya` user. By default the deployment root is
+`/home/amamiya/sub2api_mini`; adjust `/etc/conf.d/sub2api-mini` when using a
+different user or path.
+
+```sh
+sudo install -m 755 deploy/openrc/sub2api-mini /etc/init.d/sub2api-mini
+sudo install -m 644 deploy/openrc/sub2api-mini.conf /etc/conf.d/sub2api-mini
+sudo rc-update add sub2api-mini default
+sudo rc-service sub2api-mini start
+```
+
+Set `SUB2API_MINI_ENV_FILE` indirectly through the service's `app_home`; keep
+`${app_home}/.env` owned by the service user with mode `0600`.
+
 The administrator creates and disables users. Each user has an isolated session, API keys, dashboard, and usage history. Upstream accounts remain administrator-managed and shared by the gateway scheduler.
 User authentication is local username/email and password only. The account console follows the original five-platform matrix:
 
