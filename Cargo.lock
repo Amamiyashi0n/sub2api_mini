@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "sub2api_mini"
-version = "0.2.70"
+version = "0.2.71"
 dependencies = [
  "aes-gcm",
  "argon2",
