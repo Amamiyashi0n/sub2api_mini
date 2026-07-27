@@ -17,13 +17,6 @@ use crate::{
     state::AppState,
 };
 
-pub fn public_router() -> Router<AppState> {
-    Router::new()
-        .route("/announcements", get(public_announcements))
-        .route("/pages", get(public_pages))
-        .route("/pages/{slug}", get(public_page))
-}
-
 pub fn user_router() -> Router<AppState> {
     Router::new()
         .route("/announcements", get(user_announcements))
@@ -209,29 +202,6 @@ async fn user_target_context(state: &AppState, user_id: i64) -> ApiResult<(i64, 
     .await?
     .ok_or_else(|| ApiError::not_found("user not found"))?;
     Ok((balance, active_plan_ids(state, user_id).await?))
-}
-
-async fn public_announcements(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    let sql = format!(
-        "{ANNOUNCEMENT_SELECT} WHERE announcements.status = 'active' \
-         AND (announcements.starts_at IS NULL OR datetime(announcements.starts_at) <= CURRENT_TIMESTAMP) \
-         AND (announcements.ends_at IS NULL OR datetime(announcements.ends_at) > CURRENT_TIMESTAMP) \
-         ORDER BY announcements.id DESC LIMIT 50"
-    );
-    let rows = sqlx::query_as::<_, AnnouncementRow>(&sql)
-        .fetch_all(&state.pool)
-        .await?;
-    let mut data = Vec::new();
-    for row in rows {
-        let targeting = parse_targeting(&row.targeting)?;
-        if targeting.any_of.is_empty() {
-            data.push(announcement_value(row, targeting));
-        }
-        if data.len() == 20 {
-            break;
-        }
-    }
-    Ok(Json(json!({"data": data})))
 }
 
 async fn user_announcements(
@@ -583,8 +553,6 @@ struct PageInput {
     content: String,
     #[serde(default = "custom_kind")]
     kind: String,
-    #[serde(default)]
-    public: bool,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
@@ -598,26 +566,15 @@ fn default_true() -> bool {
     true
 }
 
-async fn public_pages(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    list_pages(&state, true).await
-}
-
-async fn public_page(
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-) -> ApiResult<Json<Value>> {
-    page_by_slug(&state, &slug, true).await
-}
-
 async fn user_pages(State(state): State<AppState>) -> ApiResult<Json<Value>> {
-    list_pages(&state, false).await
+    list_pages(&state).await
 }
 
 async fn user_page(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    page_by_slug(&state, &slug, false).await
+    page_by_slug(&state, &slug).await
 }
 
 async fn admin_pages(State(state): State<AppState>) -> ApiResult<Json<Value>> {
@@ -640,13 +597,12 @@ async fn create_page(
     validate_page(&input)?;
     let result = sqlx::query(
         "INSERT INTO content_pages (slug, title, content, kind, public, enabled, sort_order) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, 0, ?, ?)",
     )
     .bind(input.slug.trim())
     .bind(input.title.trim())
     .bind(input.content.trim())
     .bind(&input.kind)
-    .bind(input.public)
     .bind(input.enabled)
     .bind(input.sort_order)
     .execute(&state.pool)
@@ -665,14 +621,13 @@ async fn update_page(
 ) -> ApiResult<Json<Value>> {
     validate_page(&input)?;
     let result = sqlx::query(
-        "UPDATE content_pages SET slug = ?, title = ?, content = ?, kind = ?, public = ?, \
+        "UPDATE content_pages SET slug = ?, title = ?, content = ?, kind = ?, public = 0, \
          enabled = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
     .bind(input.slug.trim())
     .bind(input.title.trim())
     .bind(input.content.trim())
     .bind(&input.kind)
-    .bind(input.public)
     .bind(input.enabled)
     .bind(input.sort_order)
     .bind(id)
@@ -696,14 +651,13 @@ async fn delete_page(State(state): State<AppState>, Path(id): Path<i64>) -> ApiR
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn list_pages(state: &AppState, public_only: bool) -> ApiResult<Json<Value>> {
+async fn list_pages(state: &AppState) -> ApiResult<Json<Value>> {
     let rows: Vec<(i64, String, String, String, String, bool, bool, i64, String, String)> =
         sqlx::query_as(
             "SELECT id, slug, title, content, kind, public, enabled, sort_order, created_at, updated_at \
-             FROM content_pages WHERE enabled = 1 AND (? = 0 OR public = 1) \
+             FROM content_pages WHERE enabled = 1 \
              ORDER BY sort_order ASC, id ASC",
         )
-        .bind(public_only)
         .fetch_all(&state.pool)
         .await?;
     Ok(Json(
@@ -711,15 +665,13 @@ async fn list_pages(state: &AppState, public_only: bool) -> ApiResult<Json<Value
     ))
 }
 
-async fn page_by_slug(state: &AppState, slug: &str, public_only: bool) -> ApiResult<Json<Value>> {
+async fn page_by_slug(state: &AppState, slug: &str) -> ApiResult<Json<Value>> {
     let row: Option<(i64, String, String, String, String, bool, bool, i64, String, String)> =
         sqlx::query_as(
             "SELECT id, slug, title, content, kind, public, enabled, sort_order, created_at, updated_at \
-             FROM content_pages WHERE slug = ? COLLATE NOCASE AND enabled = 1 \
-             AND (? = 0 OR public = 1)",
+             FROM content_pages WHERE slug = ? COLLATE NOCASE AND enabled = 1",
         )
         .bind(slug)
-        .bind(public_only)
         .fetch_optional(&state.pool)
         .await?;
     let mut value = page_value(row.ok_or_else(|| ApiError::not_found("content page not found"))?);
@@ -1064,43 +1016,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publishes_announcements_and_controls_public_page_visibility() {
+    async fn content_pages_are_available_only_through_authenticated_routes() {
         let (_directory, state) = test_support::state().await;
         let app = Router::new()
             .nest("/api/admin", admin_router())
-            .nest("/api/public", public_router())
+            .nest("/api/user", user_router())
             .with_state(state.clone());
-
-        let announcement = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/admin/announcements")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"title":"Service notice","content":"Available now","status":"active","notify_mode":"silent"}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(announcement.status(), StatusCode::CREATED);
-        let public_list = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/public/announcements")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let body = to_bytes(public_list.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let value: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(value["data"][0]["title"], "Service notice");
 
         let page = app
             .clone()
@@ -1117,20 +1038,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(page.status(), StatusCode::CREATED);
-        let public_page = app
+        let user_page = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/public/pages/terms")
+                    .uri("/api/user/pages/terms")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(public_page.status(), StatusCode::OK);
-        let body = to_bytes(public_page.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
+        assert_eq!(user_page.status(), StatusCode::OK);
+        let body = to_bytes(user_page.into_body(), 1024 * 1024).await.unwrap();
         let value: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["data"]["kind"], "legal");
         assert_eq!(value["data"]["render_mode"], "markdown");
@@ -1155,7 +1074,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/public/pages/status-board")
+                    .uri("/api/user/pages/status-board")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -1179,22 +1098,22 @@ mod tests {
                     .uri("/api/admin/pages/1")
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        r#"{"slug":"terms","title":"Terms","content":"Terms body","kind":"legal","public":false,"enabled":true}"#,
+                        r#"{"slug":"terms","title":"Terms","content":"Terms body","kind":"legal","public":false,"enabled":false}"#,
                     ))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(hidden.status(), StatusCode::OK);
-        let no_longer_public = app
+        let disabled_page = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/public/pages/terms")
+                    .uri("/api/user/pages/terms")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(no_longer_public.status(), StatusCode::NOT_FOUND);
+        assert_eq!(disabled_page.status(), StatusCode::NOT_FOUND);
     }
 }

@@ -29,6 +29,8 @@ Runtime configuration is loaded directly from `/data/sub2api_mini/.env`. The UI 
 The administrator creates and disables users. Each user has an isolated session, API keys, dashboard, and usage history. Upstream accounts remain administrator-managed and shared by the gateway scheduler.
 User authentication is local username/email and password only. The account console follows the original five-platform matrix:
 
+The public homepage and unauthenticated API-key usage lookup are intentionally removed. Usage details and managed content pages require a signed-in user session.
+
 - Anthropic: Claude Code OAuth/Setup Token, Claude Console API Key, AWS Bedrock, and Vertex Service Account.
 - OpenAI: Codex OAuth and API Key.
 - Gemini: Gemini CLI OAuth, AI Studio API Key, and Vertex Service Account.

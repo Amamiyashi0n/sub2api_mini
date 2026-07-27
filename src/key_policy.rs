@@ -183,40 +183,6 @@ pub async fn list_keys(pool: &SqlitePool, owner_id: Option<i64>) -> ApiResult<Ve
         .collect()
 }
 
-pub async fn get_key(pool: &SqlitePool, id: i64) -> ApiResult<Value> {
-    let row = sqlx::query_as::<_, KeyListRow>(
-        "SELECT keys.id, keys.user_id, keys.name, keys.token_prefix, keys.enabled, \
-         keys.last_used_at, keys.last_used_ip, keys.created_at, keys.updated_at, keys.expires_at, \
-         keys.quota_tokens, keys.quota_cost_microusd, keys.quota_reset_at, keys.allowed_models, \
-         keys.group_id, groups.name AS group_name, users.username AS owner_username, \
-         keys.ip_whitelist, keys.ip_blacklist, keys.rate_limit_5h_microusd, \
-         keys.rate_limit_1d_microusd, keys.rate_limit_7d_microusd, keys.rate_usage_reset_at, \
-         COALESCE((SELECT SUM(COALESCE(log.total_tokens, 0)) FROM usage_logs log \
-           WHERE log.api_key_id = keys.id AND (keys.quota_reset_at IS NULL OR \
-           datetime(log.created_at) >= datetime(keys.quota_reset_at))), 0) AS used_tokens, \
-         COALESCE((SELECT SUM(log.cost_microusd) FROM usage_logs log \
-           WHERE log.api_key_id = keys.id AND (keys.quota_reset_at IS NULL OR \
-           datetime(log.created_at) >= datetime(keys.quota_reset_at))), 0) AS used_cost_microusd, \
-         COALESCE((SELECT SUM(log.cost_microusd) FROM usage_logs log WHERE log.api_key_id = keys.id \
-           AND datetime(log.created_at) >= datetime('now', '-5 hours') AND \
-           (keys.rate_usage_reset_at IS NULL OR datetime(log.created_at) >= datetime(keys.rate_usage_reset_at))), 0) AS usage_5h_microusd, \
-         COALESCE((SELECT SUM(log.cost_microusd) FROM usage_logs log WHERE log.api_key_id = keys.id \
-           AND datetime(log.created_at) >= datetime('now', '-1 day') AND \
-           (keys.rate_usage_reset_at IS NULL OR datetime(log.created_at) >= datetime(keys.rate_usage_reset_at))), 0) AS usage_1d_microusd, \
-         COALESCE((SELECT SUM(log.cost_microusd) FROM usage_logs log WHERE log.api_key_id = keys.id \
-           AND datetime(log.created_at) >= datetime('now', '-7 days') AND \
-           (keys.rate_usage_reset_at IS NULL OR datetime(log.created_at) >= datetime(keys.rate_usage_reset_at))), 0) AS usage_7d_microusd \
-         FROM api_keys keys LEFT JOIN users ON users.id = keys.user_id \
-         LEFT JOIN groups ON groups.id = keys.group_id WHERE keys.id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("API key not found"))?;
-    serde_json::to_value(row.into_view()?)
-        .map_err(|_| ApiError::internal("cannot serialize API key policy"))
-}
-
 pub fn validate_microusd(value: i64, field: &str) -> ApiResult<i64> {
     if !(0..=MAX_MICROUSD).contains(&value) {
         return Err(ApiError::bad_request(

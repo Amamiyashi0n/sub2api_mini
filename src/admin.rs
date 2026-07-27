@@ -71,8 +71,7 @@ async fn settings(State(state): State<AppState>) -> ApiResult<Json<Value>> {
     let mail_configured = crate::mail::is_configured(&state).await?;
     let values: Vec<(String, String)> = sqlx::query_as(
         "SELECT key, value FROM app_settings WHERE key IN \
-         ('site_name', 'site_subtitle', 'site_logo', 'contact_info', 'doc_url', \
-          'home_content', 'audit_retention_days', 'registration_enabled', \
+         ('site_name', 'site_subtitle', 'site_logo', 'audit_retention_days', 'registration_enabled', \
           'email_verification_enabled', 'password_reset_enabled', \
           'channel_monitor_enabled', 'channel_monitor_default_interval_seconds', \
           'turnstile_enabled', 'turnstile_site_key', 'turnstile_secret_key_encrypted', \
@@ -110,9 +109,6 @@ async fn settings(State(state): State<AppState>) -> ApiResult<Json<Value>> {
         "site_name": site_name,
         "site_subtitle": setting_string("site_subtitle", "个人 AI API 网关"),
         "site_logo": setting_string("site_logo", ""),
-        "contact_info": setting_string("contact_info", ""),
-        "doc_url": setting_string("doc_url", ""),
-        "home_content": setting_string("home_content", ""),
         "default_theme": crate::public::normalize_theme(values.iter().find(|row| row.0 == "default_theme").map(|row| row.1.as_str())),
         "audit_retention_days": audit_retention_days,
         "retry_attempts": runtime.retry_attempts,
@@ -144,12 +140,6 @@ struct SettingsInput {
     site_subtitle: String,
     #[serde(default)]
     site_logo: String,
-    #[serde(default)]
-    contact_info: String,
-    #[serde(default)]
-    doc_url: String,
-    #[serde(default)]
-    home_content: String,
     audit_retention_days: i64,
     retry_attempts: usize,
     model_cache_seconds: u64,
@@ -192,10 +182,7 @@ async fn update_settings(
     if input.site_name.trim().is_empty()
         || input.site_name.chars().count() > 80
         || input.site_subtitle.chars().count() > 200
-        || input.contact_info.chars().count() > 500
-        || input.home_content.len() > 500_000
         || !valid_site_logo(&input.site_logo)
-        || !valid_optional_http_url(&input.doc_url)
         || !(1..=3650).contains(&input.audit_retention_days)
         || !matches!(input.default_theme.trim(), "light" | "dark")
     {
@@ -248,9 +235,6 @@ async fn update_settings(
         ("default_theme", input.default_theme.trim().to_string()),
         ("site_subtitle", input.site_subtitle.trim().to_string()),
         ("site_logo", input.site_logo.trim().to_string()),
-        ("contact_info", input.contact_info.trim().to_string()),
-        ("doc_url", input.doc_url.trim().to_string()),
-        ("home_content", input.home_content.trim().to_string()),
         (
             "audit_retention_days",
             input.audit_retention_days.to_string(),

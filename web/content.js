@@ -12,89 +12,27 @@ window.Sub2MiniContent = (() => {
     countdownTimer = null;
   }
 
-  function publicShell(backHref, backLabel) {
-    return `<main class="public-screen"><header class="public-topbar"><a class="public-brand" href="#/home"><img src="${siteLogo()}" alt=""><span>${escapeHtml(state.siteName)}</span></a><a class="button secondary" href="${backHref}">${backLabel}</a></header><div class="public-content"><div class="boot-screen compact"><p>正在载入</p></div></div></main>`;
-  }
-
-  function applyPublicSettings(settings) {
-    state.siteName = settings.site_name || state.siteName;
-    state.siteSubtitle = settings.site_subtitle || state.siteSubtitle;
-    state.siteLogo = settings.site_logo || "/logo.svg";
-    state.contactInfo = settings.contact_info || "";
-    state.docUrl = settings.doc_url || "";
-    state.homeContent = settings.home_content || "";
-    state.homeContentHtml = settings.home_content_html || "";
-    state.homeContentUrl = settings.home_content_url || null;
-    document.title = state.siteName;
-  }
-
-  async function renderHome() {
-    stopMonitorTimers();
-    app.innerHTML = publicShell("#/overview", state.user ? "返回控制台" : "账户登录");
-    try {
-      const [settingsResult, announcements, pages] = await Promise.all([
-        api("/api/public/settings"),
-        api("/api/public/announcements"),
-        api("/api/public/pages"),
-      ]);
-      applyPublicSettings(settingsResult.data);
-      app.innerHTML = publicShell("#/overview", state.user ? "返回控制台" : "账户登录");
-      const content = document.querySelector(".public-content");
-      const homeFeature = state.homeContentUrl
-        ? `<section class="home-embed"><div class="section-title"><h2>站点内容</h2><a class="button quiet small" href="${escapeHtml(state.homeContentUrl)}" target="_blank" rel="noopener noreferrer">新窗口打开</a></div><iframe src="${escapeHtml(state.homeContentUrl)}" title="站点内容" loading="lazy"></iframe></section>`
-        : state.homeContentHtml
-          ? `<section class="home-markdown markdown-body">${state.homeContentHtml}</section>`
-          : "";
-      content.innerHTML = `
-        <section class="public-hero"><img src="${siteLogo()}" alt=""><div><h1>${escapeHtml(state.siteName)}</h1><p>${escapeHtml(state.siteSubtitle)}</p><div class="public-actions"><a class="button" href="#/overview">${state.user ? "打开控制台" : "账户登录"}</a><a class="button secondary" href="#/key-usage">查询 Key 用量</a>${state.docUrl ? `<a class="button quiet" href="${escapeHtml(state.docUrl)}" target="_blank" rel="noopener noreferrer">使用文档</a>` : ""}</div>${state.contactInfo ? `<small>${escapeHtml(state.contactInfo)}</small>` : ""}</div></section>
-        ${homeFeature}
-        <section class="section"><div class="section-title"><h2>公告</h2></div>${announcements.data.length ? announcementCards(announcements.data, true) : emptyState("暂无公告", "当前没有公开公告")}</section>
-        <section class="section"><div class="section-title"><h2>公开文档</h2></div>${pages.data.length ? pageLinks(pages.data) : emptyState("暂无公开文档", "当前没有公开内容页")}</section>`;
-      enhanceMarkdown(content);
-    } catch (error) {
-      document.querySelector(".public-content").innerHTML = emptyState("载入失败", error.message, "重试", "retry-public-home");
-      document.querySelector("#retry-public-home")?.addEventListener("click", renderHome);
-    }
-  }
-
   function pageLinks(items) {
     return `<div class="public-page-links">${items.map(item => `<a href="#/page/${encodeURIComponent(item.slug)}"><span>${item.kind === "legal" ? "法律文档" : item.render_mode === "iframe" ? "嵌入页面" : "页面"}</span><strong>${escapeHtml(item.title)}</strong></a>`).join("")}</div>`;
   }
 
-  async function fetchPage(slug) {
-    const path = encodeURIComponent(slug);
-    if (state.user) return api(`/api/user/pages/${path}`);
-    try {
-      return await api(`/api/public/pages/${path}`);
-    } catch (error) {
-      if (error.status !== 404) throw error;
-      try {
-        const session = await api("/api/auth/me");
-        applyIdentity(session.data);
-      } catch (_) {
-        throw error;
-      }
-      return api(`/api/user/pages/${path}`);
-    }
-  }
-
-  async function renderPage(slug) {
+  async function renderPage(page, slug) {
     stopMonitorTimers();
-    app.innerHTML = publicShell("#/home", "返回公共首页");
+    page.innerHTML = `<div class="boot-screen compact"><p>正在载入</p></div>`;
     try {
-      const result = await fetchPage(slug);
+      const path = encodeURIComponent(decodeURIComponent(slug));
+      const result = await api(`/api/user/pages/${path}`);
       const data = result.data;
-      const content = document.querySelector(".public-content");
       if (data.render_mode === "iframe") {
-        content.innerHTML = `<section class="embedded-page"><header><div><span>嵌入页面</span><h1>${escapeHtml(data.title)}</h1><p>更新于 ${formatDate(data.updated_at)}</p></div><a class="button secondary" href="${escapeHtml(data.iframe_url)}" target="_blank" rel="noopener noreferrer">新窗口打开</a></header><iframe src="${escapeHtml(data.iframe_url)}" title="${escapeHtml(data.title)}" allowfullscreen></iframe></section>`;
+        page.innerHTML = `<section class="embedded-page"><header><div><span>嵌入页面</span><h1>${escapeHtml(data.title)}</h1><p>更新于 ${formatDate(data.updated_at)}</p></div><a class="button secondary" href="${escapeHtml(data.iframe_url)}" target="_blank" rel="noopener noreferrer">新窗口打开</a></header><iframe src="${escapeHtml(data.iframe_url)}" title="${escapeHtml(data.title)}" allowfullscreen></iframe></section>`;
         return;
       }
-      content.innerHTML = `<article class="public-document"><header><span>${data.kind === "legal" ? "法律文档" : "内容页"}</span><h1>${escapeHtml(data.title)}</h1><p>更新于 ${formatDate(data.updated_at)}</p></header><div class="document-layout"><aside class="document-toc" hidden><strong>目录</strong><nav></nav></aside><div class="markdown-body document-body">${data.rendered_html || ""}</div></div></article>`;
-      buildToc(content.querySelector(".public-document"));
-      enhanceMarkdown(content);
+      page.innerHTML = `<article class="public-document"><header><span>${data.kind === "legal" ? "法律文档" : "内容页"}</span><h1>${escapeHtml(data.title)}</h1><p>更新于 ${formatDate(data.updated_at)}</p></header><div class="document-layout"><aside class="document-toc" hidden><strong>目录</strong><nav></nav></aside><div class="markdown-body document-body">${data.rendered_html || ""}</div></div></article>`;
+      buildToc(page.querySelector(".public-document"));
+      enhanceMarkdown(page);
     } catch (error) {
-      document.querySelector(".public-content").innerHTML = emptyState("页面不存在", error.message, "返回公共首页", "back-public-home");
-      document.querySelector("#back-public-home")?.addEventListener("click", () => { location.hash = "#/home"; });
+      page.innerHTML = emptyState("页面不存在", error.message, "返回内容页", "back-content-pages");
+      page.querySelector("#back-content-pages")?.addEventListener("click", () => { location.hash = "#/pages"; });
     }
   }
 
@@ -222,5 +160,5 @@ window.Sub2MiniContent = (() => {
     if (currentRouteName() !== "monitor") stopMonitorTimers();
   });
 
-  return { renderHome, renderPage, renderPages, renderMonitor };
+  return { renderPage, renderPages, renderMonitor };
 })();

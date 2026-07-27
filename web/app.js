@@ -14,11 +14,6 @@ siteLogo: "/logo.svg",
 version: "",
 defaultTheme: "light",
 theme: initialTheme,
-contactInfo: "",
-docUrl: "",
-homeContent: "",
-homeContentHtml: "",
-homeContentUrl: null,
 registrationEnabled: false,
 emailVerificationEnabled: false,
 passwordResetEnabled: true,
@@ -264,11 +259,6 @@ try {
   state.version = settings.data.version || "";
   state.defaultTheme = normalizeTheme(settings.data.default_theme);
   applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || state.defaultTheme);
-  state.contactInfo = settings.data.contact_info || "";
-  state.docUrl = settings.data.doc_url || "";
-  state.homeContent = settings.data.home_content || "";
-  state.homeContentHtml = settings.data.home_content_html || "";
-  state.homeContentUrl = settings.data.home_content_url || null;
   state.registrationEnabled = Boolean(settings.data.registration_enabled);
   state.emailVerificationEnabled = Boolean(settings.data.email_verification_enabled);
   state.passwordResetEnabled = Boolean(settings.data.password_reset_enabled);
@@ -288,18 +278,6 @@ if (routeName === "email-verify" && sessionStorage.getItem("mini_pending_registr
 if (routeName === "setup") {
   await loadFeatureScript("setup");
   await window.Sub2MiniSetup.render();
-  return;
-}
-if (routeName === "key-usage") {
-  renderPublicKeyUsage();
-  return;
-}
-if (routeName === "home") {
-  await renderPublicHome();
-  return;
-}
-if (routeName.startsWith("page/")) {
-  await renderPublicPage(routeName.slice(5));
   return;
 }
 if (["register", "forgot-password", "reset-password"].includes(routeName)) {
@@ -408,7 +386,7 @@ app.innerHTML = `
           <button class="button" type="submit">登录</button>
           <p id="login-error" class="form-error">${escapeHtml(message)}</p>
         </form>
-        <div class="login-links"><a class="text-link" href="#/home">公共首页</a><a class="text-link" href="#/key-usage">查询 API Key 用量</a>${state.registrationEnabled ? '<a class="text-link" href="#/register">注册账户</a>' : ""}${state.passwordResetEnabled && state.mailConfigured ? '<a class="text-link" href="#/forgot-password">忘记密码</a>' : ""}</div>
+        <div class="login-links">${state.registrationEnabled ? '<a class="text-link" href="#/register">注册账户</a>' : ""}${state.passwordResetEnabled && state.mailConfigured ? '<a class="text-link" href="#/forgot-password">忘记密码</a>' : ""}</div>
       </div>
     </section>
   </main>`;
@@ -484,7 +462,7 @@ renderAuthScreen("注册账户", `创建 ${state.siteName} 账户`, `
     <div class="field"><label for="register-confirm">确认密码</label><input id="register-confirm" name="confirm_password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required></div>
     ${turnstileField()}
     <button class="button auth-submit" type="submit">${state.emailVerificationEnabled ? "继续验证邮箱" : "创建账户"}</button><p class="form-error" id="register-error"></p>
-  </form>`, '<a class="text-link" href="#/overview">已有账户，返回登录</a><a class="text-link" href="#/home">公共首页</a>');
+  </form>`, '<a class="text-link" href="#/overview">已有账户，返回登录</a>');
 document.querySelector("#register-form").addEventListener("submit", handleRegister);
 mountTurnstile(document.querySelector("#register-form"));
 }
@@ -799,8 +777,11 @@ async function renderRoute() {
 const hash = location.hash.replace(/^#\/?/, "");
 const [routeName, query = ""] = hash.split("?");
 const allowed = new Map(activeRoutes());
-const route = allowed.get(routeName) || routes.overview;
-const activeRouteName = allowed.has(routeName) ? routeName : "overview";
+const contentPageSlug = routeName.startsWith("page/") ? routeName.slice(5) : "";
+const route = contentPageSlug
+  ? { label: "内容页", render: page => renderContentPage(page, contentPageSlug) }
+  : allowed.get(routeName) || routes.overview;
+const activeRouteName = contentPageSlug ? "pages" : allowed.has(routeName) ? routeName : "overview";
 closeUpstreamAccountMenu();
 stopAccountAutoRefresh();
 document.querySelectorAll("[data-route]").forEach(link => {
@@ -2345,6 +2326,10 @@ async function renderPages(page) {
 await loadFeatureScript("content");
 return window.Sub2MiniContent.renderPages(page);
 }
+async function renderContentPage(page, slug) {
+await loadFeatureScript("content");
+return window.Sub2MiniContent.renderPage(page, slug);
+}
 async function renderContentAdmin(page) {
 await loadFeatureScript("engagement");
 return window.Sub2MiniEngagement.renderContentAdmin(page);
@@ -2550,108 +2535,6 @@ try {
   button.disabled = false;
 }
 }
-async function renderPublicHome() {
-await loadFeatureScript("content");
-return window.Sub2MiniContent.renderHome();
-}
-async function renderPublicPage(slug) {
-await loadFeatureScript("content");
-return window.Sub2MiniContent.renderPage(slug);
-}
-function renderPublicKeyUsage() {
-app.innerHTML = `
-  <main class="public-screen">
-    <header class="public-topbar">
-      <a class="public-brand" href="#/overview"><img src="${siteLogo()}" alt=""><span>${escapeHtml(state.siteName)}</span></a>
-      <a class="button secondary" href="#/overview">${state.user ? "返回控制台" : "账户登录"}</a>
-    </header>
-    <div class="public-content">
-      ${pageHeader("API Key 用量", "按密钥查询请求与 Token 使用情况")}
-      <section class="query-panel">
-        <form id="key-usage-form">
-          <div class="query-grid">
-            <div class="field query-key-field"><label for="usage-api-key">API Key</label><input id="usage-api-key" name="api_key" type="password" autocomplete="off" placeholder="sk-mini_..." required></div>
-            <div class="field"><label for="usage-range">时间范围</label><select id="usage-range" name="range"><option value="today">今天</option><option value="7d" selected>最近 7 天</option><option value="30d">最近 30 天</option><option value="all">全部</option><option value="custom">自定义</option></select></div>
-            <button class="button query-button" type="submit">查询</button>
-          </div>
-          <div class="custom-dates" id="custom-dates" hidden>
-            <div class="field"><label for="usage-start">开始日期</label><input id="usage-start" name="start_date" type="date"></div>
-            <div class="field"><label for="usage-end">结束日期</label><input id="usage-end" name="end_date" type="date"></div>
-          </div>
-          <p class="form-error" id="key-usage-error"></p>
-        </form>
-      </section>
-      <div id="key-usage-result"></div>
-    </div>
-  </main>`;
-const form = document.querySelector("#key-usage-form");
-form.elements.range.addEventListener("change", () => {
-  const custom = form.elements.range.value === "custom";
-  document.querySelector("#custom-dates").hidden = !custom;
-  form.elements.start_date.required = custom;
-  form.elements.end_date.required = custom;
-});
-form.addEventListener("submit", queryKeyUsage);
-}
-async function queryKeyUsage(event) {
-event.preventDefault();
-const form = event.currentTarget;
-if (!form.reportValidity()) return;
-const button = form.querySelector("button[type=submit]");
-const error = form.querySelector("#key-usage-error");
-const resultArea = document.querySelector("#key-usage-result");
-const values = Object.fromEntries(new FormData(form));
-button.disabled = true;
-error.textContent = "";
-resultArea.innerHTML = `<div class="boot-screen compact"><p>正在查询</p></div>`;
-try {
-  const result = await api("/api/public/key-usage", { method: "POST", body: JSON.stringify(values) });
-  resultArea.innerHTML = keyUsageResult(result.data);
-} catch (requestError) {
-  resultArea.innerHTML = "";
-  error.textContent = requestError.message;
-} finally {
-  button.disabled = false;
-}
-}
-function keyUsageResult(data) {
-const stats = data.stats;
-return `
-  <section class="key-result-header">
-    <div><span class="cell-sub">密钥</span><strong>${escapeHtml(data.key.name)}</strong><span class="mono cell-sub">${escapeHtml(data.key.token_prefix)}...</span></div>
-    ${data.key.enabled ? status("有效") : status("已停用", "off")}
-  </section>
-  <section class="metric-grid key-metrics">
-    ${metric("请求", formatNumber(stats.requests), "good")}
-    ${metric("成功", formatNumber(stats.successful_requests), "good")}
-    ${metric("失败", formatNumber(stats.failed_requests), stats.failed_requests ? "warn" : "good")}
-    ${metric("输入 Token", formatNumber(stats.input_tokens))}
-    ${metric("输出 Token", formatNumber(stats.output_tokens))}
-    ${metric("缓存 Token", formatNumber(stats.cached_input_tokens))}
-    ${metric("推理 Token", formatNumber(stats.reasoning_tokens))}
-    ${metric("总 Token", formatNumber(stats.total_tokens))}
-    ${metric("成本", formatUsdMicros(stats.cost_microusd))}
-    ${metric("平均耗时", `${formatNumber(stats.average_duration_ms)} ms`)}
-  </section>
-  <section class="key-policy-summary">
-    <div><span>状态</span><strong>${escapeHtml(data.key.status || (data.key.enabled ? "active" : "inactive"))}</strong></div>
-    <div><span>总 Token 额度</span><strong>${data.key.quota_tokens ? `${formatNumber(data.key.used_tokens)} / ${formatNumber(data.key.quota_tokens)}` : "无限"}</strong></div>
-    <div><span>总消费额度</span><strong>${data.key.quota_cost_microusd ? `${formatUsdMicros(data.key.used_cost_microusd)} / ${formatUsdMicros(data.key.quota_cost_microusd)}` : "无限"}</strong></div>
-    <div><span>5h / 1d / 7d</span><strong>${formatUsdMicros(data.key.usage_5h_microusd)} / ${formatUsdMicros(data.key.usage_1d_microusd)} / ${formatUsdMicros(data.key.usage_7d_microusd)}</strong></div>
-    <div><span>模型策略</span><strong>${data.key.allowed_model_count ? `${data.key.allowed_model_count} 个模型` : "全部模型"}</strong></div>
-    <div><span>IP 策略</span><strong>白名单 ${data.key.ip_whitelist_count} · 黑名单 ${data.key.ip_blacklist_count}</strong></div>
-  </section>
-  <div class="usage-breakdown">
-    <section>
-      <div class="section-title"><h2>模型分布</h2></div>
-      ${data.models.length ? `<div class="table-wrap"><table><thead><tr><th>模型</th><th>请求</th><th>Token</th></tr></thead><tbody>${data.models.map(row => `<tr><td>${escapeHtml(row.model)}</td><td>${formatNumber(row.requests)}</td><td>${formatNumber(row.tokens)}</td></tr>`).join("")}</tbody></table></div>` : emptyState("暂无模型数据", "所选时间范围内没有请求")}
-    </section>
-    <section>
-      <div class="section-title"><h2>每日用量</h2></div>
-      ${data.trend.length ? `<div class="table-wrap"><table><thead><tr><th>日期</th><th>请求</th><th>Token</th></tr></thead><tbody>${data.trend.map(row => `<tr><td>${escapeHtml(row.date)}</td><td>${formatNumber(row.requests)}</td><td>${formatNumber(row.tokens)}</td></tr>`).join("")}</tbody></table></div>` : emptyState("暂无每日数据", "所选时间范围内没有请求")}
-    </section>
-  </div>`;
-}
 function usageTable(rows, full = false) {
 if (!rows.length) return emptyState("暂无请求记录", "网关请求完成后将在这里出现");
 const userHeader = state.role === "admin" ? "<th>用户</th>" : "";
@@ -2691,9 +2574,7 @@ page.innerHTML = `
       <form id="runtime-settings-form">
         <div class="field"><label for="setting-site-name">站点名称</label><input id="setting-site-name" name="site_name" value="${escapeHtml(settings.site_name)}" maxlength="80" required></div>
         <div class="field"><label for="setting-site-subtitle">站点副标题</label><input id="setting-site-subtitle" name="site_subtitle" value="${escapeHtml(settings.site_subtitle || "")}" maxlength="200"></div>
-        <div class="form-grid"><div class="field"><label for="setting-site-logo">Logo URL 或 data:image</label><input id="setting-site-logo" name="site_logo" value="${escapeHtml(settings.site_logo || "")}" maxlength="262144" placeholder="/logo.svg"></div><div class="field"><label for="setting-doc-url">文档地址</label><input id="setting-doc-url" name="doc_url" type="url" value="${escapeHtml(settings.doc_url || "")}" placeholder="https://docs.example.com"></div></div>
-        <div class="field"><label for="setting-contact-info">联系信息</label><input id="setting-contact-info" name="contact_info" value="${escapeHtml(settings.contact_info || "")}" maxlength="500" placeholder="邮箱、群组或支持入口"></div>
-        <div class="field"><label for="setting-home-content">首页内容</label><textarea id="setting-home-content" name="home_content" class="page-editor" maxlength="500000" placeholder="Markdown；只填写 HTTP(S) URL 时使用嵌入页面">${escapeHtml(settings.home_content || "")}</textarea><span class="field-hint">Markdown 会在服务端安全渲染；完整 HTTP(S) URL 会显示为嵌入页。</span></div>
+        <div class="field"><label for="setting-site-logo">Logo URL 或 data:image</label><input id="setting-site-logo" name="site_logo" value="${escapeHtml(settings.site_logo || "")}" maxlength="262144" placeholder="/logo.svg"></div>
         <div class="form-grid"><div class="field"><label for="setting-retries">故障切换次数</label><input id="setting-retries" name="retry_attempts" type="number" min="1" max="5" value="${settings.retry_attempts}" required></div><div class="field"><label for="setting-model-cache">模型缓存秒数</label><input id="setting-model-cache" name="model_cache_seconds" type="number" min="30" max="3600" value="${settings.model_cache_seconds}" required></div></div>
         <div class="form-grid"><div class="field"><label for="setting-5xx-cooldown">5xx 冷却秒数</label><input id="setting-5xx-cooldown" name="cooldown_5xx_seconds" type="number" min="1" max="600" value="${settings.cooldown_5xx_seconds}" required></div><div class="field"><label for="setting-429-cooldown">429 默认冷却秒数</label><input id="setting-429-cooldown" name="cooldown_429_seconds" type="number" min="1" max="3600" value="${settings.cooldown_429_seconds}" required></div></div>
         <div class="field"><label for="setting-audit-retention">审计保留天数</label><input id="setting-audit-retention" name="audit_retention_days" type="number" min="1" max="3650" value="${settings.audit_retention_days}" required></div>
@@ -2783,9 +2664,6 @@ try {
   state.siteLogo = result.data.site_logo || "/logo.svg";
   state.defaultTheme = normalizeTheme(result.data.default_theme);
   if (!localStorage.getItem(THEME_STORAGE_KEY)) applyTheme(state.defaultTheme);
-  state.contactInfo = result.data.contact_info || "";
-  state.docUrl = result.data.doc_url || "";
-  state.homeContent = result.data.home_content || "";
   state.registrationEnabled = result.data.registration_enabled;
   state.emailVerificationEnabled = result.data.email_verification_enabled;
   state.passwordResetEnabled = result.data.password_reset_enabled;

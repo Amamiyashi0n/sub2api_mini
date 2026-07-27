@@ -16,14 +16,14 @@ Status values:
 | Original route | Status | Mini route | Remaining behavior |
 | --- | --- | --- | --- |
 | `/setup` | complete | `#/setup` | - |
-| `/home` | complete | `#/home` | - |
+| `/home` | not-applicable | - | Public homepage explicitly removed |
 | `/login` | complete | `#/overview` | - |
 | `/register` | complete | `#/register` | - |
 | `/email-verify` | complete | `#/email-verify` | - |
 | `/forgot-password` | complete | `#/forgot-password` | - |
 | `/reset-password` | complete | `#/reset-password` | - |
-| `/key-usage` | complete | `#/key-usage` | - |
-| `/legal/:documentId` | complete | `#/page/:slug` | - |
+| `/key-usage` | not-applicable | - | Unauthenticated API Key lookup explicitly removed |
+| `/legal/:documentId` | partial | `#/page/:slug` | Login is required |
 
 Third-party user login providers are intentionally excluded. The localhost callback
 on port `1455` is retained only for upstream OpenAI/Codex account authorization.
@@ -77,10 +77,8 @@ on port `1455` is retained only for upstream OpenAI/Codex account authorization.
 
 - Added authenticated profile reads and display-name updates.
 - Added current-password verification and password changes that revoke other sessions.
-- Added public API-key usage lookup with date ranges, aggregate request/token metrics,
-  model distribution and daily usage.
-- Added corresponding embedded desktop/mobile pages without adding a frontend
-  framework or another process.
+- Removed the unauthenticated public homepage and API-key usage lookup, including
+  their backend routes, embedded pages and navigation links.
 - Added API-key expiry, token quota and model allow-list policies, enforced before
   forwarding requests and reflected in `/v1/models`.
 - Added an authenticated model catalog aggregated from enabled upstream accounts
@@ -89,10 +87,10 @@ on port `1455` is retained only for upstream OpenAI/Codex account authorization.
   ownership checks.
 - Added announcement drafting/publication, display windows, notify modes and
   per-user read state.
-- Added managed legal/custom text pages with public/authenticated visibility.
+- Added managed legal/custom text pages with authenticated visibility.
 - Added total usage, average latency, seven-day trend and top-model aggregates to
   administrator and user dashboards.
-- Added live retry/cache/cooldown runtime settings, public site branding and audit
+- Added live retry/cache/cooldown runtime settings, login branding and audit
   retention controls.
 - Added administrator mutation audit metadata without recording request bodies or
   secrets, plus filters and detail inspection.
@@ -155,9 +153,8 @@ on port `1455` is retained only for upstream OpenAI/Codex account authorization.
 - Added five-minute, one-time administrator cleanup previews bound to canonical
   filters and a snapshot high-watermark so requests created after preview cannot
   be deleted by confirmation.
-- Completed public API-key usage with exact microusd cost, cache/reasoning Token,
-  total quota, rolling 5-hour/1-day/7-day windows, model/IP policy summaries and
-  support for validated custom `sk-` keys.
+- Removed public API-key usage; equivalent owner-scoped usage remains available
+  after login through the user console.
 - Completed user dashboards with balance, Key counts, active subscription progress,
   RPM/TPM, cache/reasoning Token, cost, range switching, request charts, model and
   endpoint distributions, quick actions, announcements and recent usage.
@@ -196,12 +193,12 @@ on port `1455` is retained only for upstream OpenAI/Codex account authorization.
   page tables of contents; raw HTML and active URL schemes are never emitted.
 - Completed custom content iframe mode for bounded credential-free HTTP(S) URLs,
   including private-page reads through authenticated user APIs.
-- Completed public branding with configurable logo, subtitle, contact, docs and
-  Markdown-or-iframe home content, all served from the existing single process.
+- Retained configurable login branding while removing contact, docs and
+  Markdown-or-iframe public-home configuration.
 - Completed the user monitor view with persisted 30/60/120-second auto-refresh,
   a live countdown and compact 24-result status timelines on desktop and mobile.
 - Completed announcement targeting with OR/AND balance and active-plan rules,
-  public-content isolation, visibility-safe read marking, unread-first user views,
+  authenticated-content isolation, visibility-safe read marking, unread-first user views,
   automatic popup notices and searchable eligible/read status for every user.
 - Added routing-group platform and standard/subscription metadata, exact
   millionth-unit default and per-user rate multipliers, server-timezone peak
