@@ -1266,13 +1266,27 @@ async fn import_oauth(
 struct ClaudeOAuthStartInput {
     #[serde(default)]
     setup_token: bool,
+    #[serde(default)]
+    proxy_id: Option<i64>,
+    #[serde(default)]
+    tls_fingerprint_profile_id: Option<i64>,
 }
 
 async fn start_claude_oauth(
     State(state): State<AppState>,
     Json(input): Json<ClaudeOAuthStartInput>,
 ) -> ApiResult<Json<Value>> {
-    let result = crate::claude_oauth::start_flow(&state, input.setup_token).await?;
+    validate_proxy_id(&state, input.proxy_id).await?;
+    validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
+    let result = crate::claude_oauth::start_flow_with_options(
+        &state,
+        input.setup_token,
+        crate::claude_oauth::ClaudeOAuthOptions {
+            proxy_id: input.proxy_id,
+            tls_fingerprint_profile_id: input.tls_fingerprint_profile_id,
+        },
+    )
+    .await?;
     Ok(Json(json!({"data": result})))
 }
 
@@ -1310,8 +1324,16 @@ async fn exchange_claude_oauth(
     validate_proxy_id(&state, input.proxy_id).await?;
     validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
     validate_notes(&input.notes)?;
-    let exchanged =
-        crate::claude_oauth::exchange_code(&state, &input.session_id, &input.code).await?;
+    let exchanged = crate::claude_oauth::exchange_code_with_options(
+        &state,
+        &input.session_id,
+        &input.code,
+        crate::claude_oauth::ClaudeOAuthOptions {
+            proxy_id: input.proxy_id,
+            tls_fingerprint_profile_id: input.tls_fingerprint_profile_id,
+        },
+    )
+    .await?;
     let name = if input.name.trim().is_empty() {
         exchanged
             .credentials
@@ -1334,9 +1356,9 @@ async fn exchange_claude_oauth(
     .bind(encrypted)
     .bind(input.priority)
     .bind(input.concurrency)
-    .bind(input.proxy_id)
+    .bind(exchanged.proxy_id)
     .bind(input.notes.trim())
-    .bind(input.tls_fingerprint_profile_id)
+    .bind(exchanged.tls_fingerprint_profile_id)
     .execute(&state.pool)
     .await?;
     Ok((
@@ -1366,7 +1388,7 @@ async fn start_oauth(
     State(state): State<AppState>,
     Json(input): Json<OAuthStartInput>,
 ) -> ApiResult<Json<Value>> {
-    if let Some(account_id) = input.account_id {
+    let (proxy_id, tls_fingerprint_profile_id) = if let Some(account_id) = input.account_id {
         let account = get_account_row(&state, account_id).await?;
         if account.kind != "oauth"
             || account.platform != "openai"
@@ -1377,8 +1399,8 @@ async fn start_oauth(
                 "only OAuth accounts can be re-authorized",
             ));
         }
-    }
-    if input.account_id.is_none() {
+        (account.proxy_id, account.tls_fingerprint_profile_id)
+    } else {
         validate_account_fields(
             if input.name.trim().is_empty() {
                 "OpenAI OAuth"
@@ -1391,7 +1413,8 @@ async fn start_oauth(
         validate_proxy_id(&state, input.proxy_id).await?;
         validate_tls_profile_id(&state, input.tls_fingerprint_profile_id).await?;
         validate_notes(&input.notes)?;
-    }
+        (input.proxy_id, input.tls_fingerprint_profile_id)
+    };
     let started = oauth::start_flow_with_options(
         &state,
         input.account_id,
@@ -1399,9 +1422,9 @@ async fn start_oauth(
             name: (!input.name.trim().is_empty()).then(|| input.name.trim().to_string()),
             priority: input.priority,
             concurrency: input.concurrency,
-            proxy_id: input.proxy_id,
+            proxy_id,
             notes: input.notes,
-            tls_fingerprint_profile_id: input.tls_fingerprint_profile_id,
+            tls_fingerprint_profile_id,
         },
     )
     .await?;

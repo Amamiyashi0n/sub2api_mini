@@ -30,6 +30,14 @@ pub struct StartResult {
 pub struct ExchangedToken {
     pub credentials: Credentials,
     pub account_type: &'static str,
+    pub proxy_id: Option<i64>,
+    pub tls_fingerprint_profile_id: Option<i64>,
+}
+
+#[derive(Debug, Default)]
+pub struct ClaudeOAuthOptions {
+    pub proxy_id: Option<i64>,
+    pub tls_fingerprint_profile_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,7 +69,16 @@ struct TokenAccount {
     email_address: Option<String>,
 }
 
+#[cfg(test)]
 pub async fn start_flow(state: &AppState, setup_token: bool) -> ApiResult<StartResult> {
+    start_flow_with_options(state, setup_token, ClaudeOAuthOptions::default()).await
+}
+
+pub async fn start_flow_with_options(
+    state: &AppState,
+    setup_token: bool,
+    options: ClaudeOAuthOptions,
+) -> ApiResult<StartResult> {
     let flow_state = random_token(32)?;
     let session_id = random_token(16)?;
     let verifier = random_token(32)?;
@@ -91,6 +108,8 @@ pub async fn start_flow(state: &AppState, setup_token: bool) -> ApiResult<StartR
             verifier,
             state: flow_state,
             setup_token,
+            proxy_id: options.proxy_id,
+            tls_fingerprint_profile_id: options.tls_fingerprint_profile_id,
             created_at: Instant::now(),
         },
     );
@@ -101,10 +120,20 @@ pub async fn start_flow(state: &AppState, setup_token: bool) -> ApiResult<StartR
     })
 }
 
+#[cfg(test)]
 pub async fn exchange_code(
     state: &AppState,
     session_id: &str,
     code: &str,
+) -> ApiResult<ExchangedToken> {
+    exchange_code_with_options(state, session_id, code, ClaudeOAuthOptions::default()).await
+}
+
+pub async fn exchange_code_with_options(
+    state: &AppState,
+    session_id: &str,
+    code: &str,
+    options: ClaudeOAuthOptions,
 ) -> ApiResult<ExchangedToken> {
     let flow = state
         .claude_oauth_flows
@@ -152,8 +181,14 @@ pub async fn exchange_code(
     if let Some(state) = returned_state {
         body["state"] = json!(state);
     }
-    let response = state
-        .client
+    let proxy_id = flow.proxy_id.or(options.proxy_id);
+    let tls_fingerprint_profile_id = flow
+        .tls_fingerprint_profile_id
+        .or(options.tls_fingerprint_profile_id);
+    let client = state
+        .client_for_connection(proxy_id, tls_fingerprint_profile_id)
+        .await?;
+    let response = client
         .post(TOKEN_URL)
         .header("accept", "application/json, text/plain, */*")
         .header("user-agent", "axios/1.13.6")
@@ -177,6 +212,8 @@ pub async fn exchange_code(
         } else {
             "oauth"
         },
+        proxy_id,
+        tls_fingerprint_profile_id,
     })
 }
 
@@ -328,7 +365,16 @@ mod tests {
     async fn start_flow_uses_distinct_oauth_and_setup_token_scopes() {
         let (_directory, state) = test_support::state().await;
         let oauth = start_flow(&state, false).await.unwrap();
-        let setup = start_flow(&state, true).await.unwrap();
+        let setup = start_flow_with_options(
+            &state,
+            true,
+            ClaudeOAuthOptions {
+                proxy_id: Some(41),
+                tls_fingerprint_profile_id: Some(17),
+            },
+        )
+        .await
+        .unwrap();
         let oauth_url = url::Url::parse(&oauth.auth_url).unwrap();
         let setup_url = url::Url::parse(&setup.auth_url).unwrap();
         let oauth_scope = oauth_url
@@ -345,15 +391,11 @@ mod tests {
             .into_owned();
         assert!(oauth_scope.contains("user:sessions:claude_code"));
         assert_eq!(setup_scope, SETUP_TOKEN_SCOPE);
-        assert!(
-            state
-                .claude_oauth_flows
-                .lock()
-                .await
-                .get(&setup.session_id)
-                .unwrap()
-                .setup_token
-        );
+        let flows = state.claude_oauth_flows.lock().await;
+        let setup_flow = flows.get(&setup.session_id).unwrap();
+        assert!(setup_flow.setup_token);
+        assert_eq!(setup_flow.proxy_id, Some(41));
+        assert_eq!(setup_flow.tls_fingerprint_profile_id, Some(17));
     }
 
     #[tokio::test]

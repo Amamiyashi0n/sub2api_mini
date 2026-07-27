@@ -1526,7 +1526,7 @@ try {
 async function startClaudeOAuth() {
 const popup = window.open("about:blank", "_blank");
 try {
-  const result = await api("/api/admin/claude/oauth/start", { method: "POST", body: JSON.stringify({ setup_token: accountCreateState.addMethod === "setup_token" }) });
+  const result = await api("/api/admin/claude/oauth/start", { method: "POST", body: JSON.stringify({ ...accountCreatePayload(), setup_token: accountCreateState.addMethod === "setup_token" }) });
   accountCreateState.claude_session_id = result.data.session_id;
   if (popup) { popup.opener = null; popup.location = result.data.auth_url; } else window.open(result.data.auth_url, "_blank", "noopener");
   renderAccountCreateModal(); toast("已打开 Claude 授权页面");

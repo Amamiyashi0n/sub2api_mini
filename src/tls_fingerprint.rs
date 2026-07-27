@@ -349,8 +349,21 @@ fn unique_name_error(error: sqlx::Error) -> ApiError {
 }
 
 pub async fn client_for_account(state: &AppState, account: &Account) -> ApiResult<Client> {
-    let Some(profile_id) = account.row.tls_fingerprint_profile_id else {
-        return match account.proxy_url.as_deref() {
+    client_for_settings(
+        state,
+        account.row.tls_fingerprint_profile_id,
+        account.proxy_url.as_deref(),
+    )
+    .await
+}
+
+pub(crate) async fn client_for_settings(
+    state: &AppState,
+    profile_id: Option<i64>,
+    proxy_url: Option<&str>,
+) -> ApiResult<Client> {
+    let Some(profile_id) = profile_id else {
+        return match proxy_url {
             Some(proxy) => build_http_client(Some(proxy)),
             None => Ok(state.client.clone()),
         };
@@ -360,12 +373,12 @@ pub async fn client_for_account(state: &AppState, account: &Account) -> ApiResul
         "{}:{}:{}",
         profile.id,
         profile.updated_at,
-        account.proxy_url.as_deref().unwrap_or("")
+        proxy_url.unwrap_or("")
     );
     if let Some(client) = state.tls_clients.lock().await.get(&cache_key).cloned() {
         return Ok(client);
     }
-    let client = build_profile_client(&profile, account.proxy_url.as_deref())?;
+    let client = build_profile_client(&profile, proxy_url)?;
     let mut cache = state.tls_clients.lock().await;
     if cache.len() >= 32 {
         cache.clear();

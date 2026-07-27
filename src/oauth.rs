@@ -130,8 +130,10 @@ pub async fn complete_flow(
         ));
     }
 
-    let token = state
-        .client
+    let client = state
+        .client_for_connection(flow.proxy_id, flow.tls_fingerprint_profile_id)
+        .await?;
+    let token = client
         .post(OPENAI_TOKEN_URL)
         .form(&[
             ("grant_type", "authorization_code"),
@@ -603,10 +605,17 @@ mod tests {
         .await
         .unwrap();
 
-        let started =
-            start_flow_with_options(&state, Some(account_id), OAuthAccountOptions::default())
-                .await
-                .unwrap();
+        let started = start_flow_with_options(
+            &state,
+            Some(account_id),
+            OAuthAccountOptions {
+                proxy_id: Some(23),
+                tls_fingerprint_profile_id: Some(29),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         let url = url::Url::parse(&started.auth_url).unwrap();
         let flow_state = url
             .query_pairs()
@@ -614,16 +623,12 @@ mod tests {
             .unwrap()
             .1
             .into_owned();
-        assert_eq!(
-            state
-                .oauth_flows
-                .lock()
-                .await
-                .get(&flow_state)
-                .unwrap()
-                .account_id,
-            Some(account_id)
-        );
+        let flows = state.oauth_flows.lock().await;
+        let stored_flow = flows.get(&flow_state).unwrap();
+        assert_eq!(stored_flow.account_id, Some(account_id));
+        assert_eq!(stored_flow.proxy_id, Some(23));
+        assert_eq!(stored_flow.tls_fingerprint_profile_id, Some(29));
+        drop(flows);
         assert!(url.query_pairs().any(|pair| pair.0 == "code_challenge"));
 
         let completed = persist_completed_flow(

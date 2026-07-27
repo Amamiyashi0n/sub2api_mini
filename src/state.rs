@@ -109,6 +109,64 @@ impl AppState {
         crate::tls_fingerprint::client_for_account(self, account).await
     }
 
+    pub async fn client_for_connection(
+        &self,
+        proxy_id: Option<i64>,
+        tls_fingerprint_profile_id: Option<i64>,
+    ) -> ApiResult<Client> {
+        let proxy_url = self.effective_proxy_url(proxy_id).await?;
+        crate::tls_fingerprint::client_for_settings(
+            self,
+            tls_fingerprint_profile_id,
+            proxy_url.as_deref(),
+        )
+        .await
+    }
+
+    async fn effective_proxy_url(&self, proxy_id: Option<i64>) -> ApiResult<Option<String>> {
+        let Some(proxy_id) = proxy_id else {
+            return Ok(None);
+        };
+        let selection: Option<(bool, Option<String>)> = sqlx::query_as(
+            "SELECT CASE WHEN proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
+             datetime(proxies.expires_at) > CURRENT_TIMESTAMP) THEN 1 \
+             WHEN proxies.fallback_mode = 'direct' THEN 1 \
+             WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
+             (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > \
+             CURRENT_TIMESTAMP) THEN 1 ELSE 0 END, \
+             CASE WHEN proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
+             datetime(proxies.expires_at) > CURRENT_TIMESTAMP) THEN proxies.encrypted_url \
+             WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
+             (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > \
+             CURRENT_TIMESTAMP) THEN backup_proxies.encrypted_url ELSE NULL END \
+             FROM proxies LEFT JOIN proxies AS backup_proxies \
+             ON backup_proxies.id = proxies.backup_proxy_id WHERE proxies.id = ?",
+        )
+        .bind(proxy_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let (available, encrypted_url) = selection.ok_or_else(|| {
+            ApiError::new(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "PROXY_UNAVAILABLE",
+                "the selected proxy no longer exists",
+            )
+        })?;
+        if !available {
+            return Err(ApiError::new(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "PROXY_UNAVAILABLE",
+                "the selected proxy is disabled or expired",
+            ));
+        }
+        encrypted_url
+            .map(|value| {
+                String::from_utf8(self.crypto.decrypt(&value)?)
+                    .map_err(|_| ApiError::internal("stored proxy URL is malformed"))
+            })
+            .transpose()
+    }
+
     pub async fn resolve_account(&self, mut row: AccountRow) -> ApiResult<Account> {
         let Some(parent_id) = row.parent_account_id else {
             return row.decrypt(&self.crypto);
@@ -283,6 +341,8 @@ pub struct ClaudeOAuthFlow {
     pub verifier: String,
     pub state: String,
     pub setup_token: bool,
+    pub proxy_id: Option<i64>,
+    pub tls_fingerprint_profile_id: Option<i64>,
     pub created_at: Instant,
 }
 
@@ -441,5 +501,91 @@ impl Scheduler {
             "NO_UPSTREAM_ACCOUNT",
             "no upstream account is currently available",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_support;
+
+    #[tokio::test]
+    async fn pending_connection_honors_backup_and_direct_proxy_fallbacks() {
+        let (_directory, state) = test_support::state().await;
+        let backup_url = state.crypto.encrypt(b"http://127.0.0.1:4128").unwrap();
+        let backup_id =
+            sqlx::query("INSERT INTO proxies (name, encrypted_url) VALUES ('oauth backup', ?)")
+                .bind(backup_url)
+                .execute(&state.pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+        let primary_url = state.crypto.encrypt(b"http://127.0.0.1:3128").unwrap();
+        let primary_id = sqlx::query(
+            "INSERT INTO proxies (name, encrypted_url, fallback_mode, backup_proxy_id) \
+             VALUES ('oauth primary', ?, 'proxy', ?)",
+        )
+        .bind(primary_url)
+        .bind(backup_id)
+        .execute(&state.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        assert_eq!(
+            state.effective_proxy_url(Some(primary_id)).await.unwrap(),
+            Some("http://127.0.0.1:3128".into())
+        );
+        sqlx::query("UPDATE proxies SET enabled = 0 WHERE id = ?")
+            .bind(primary_id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            state.effective_proxy_url(Some(primary_id)).await.unwrap(),
+            Some("http://127.0.0.1:4128".into())
+        );
+
+        sqlx::query(
+            "UPDATE proxies SET fallback_mode = 'direct', backup_proxy_id = NULL WHERE id = ?",
+        )
+        .bind(primary_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            state.effective_proxy_url(Some(primary_id)).await.unwrap(),
+            None
+        );
+        assert!(
+            state
+                .client_for_connection(Some(primary_id), None)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_connection_rejects_an_unavailable_proxy() {
+        let (_directory, state) = test_support::state().await;
+        let encrypted = state.crypto.encrypt(b"socks5h://127.0.0.1:1080").unwrap();
+        let proxy_id = sqlx::query(
+            "INSERT INTO proxies (name, encrypted_url, enabled) VALUES ('offline', ?, 0)",
+        )
+        .bind(encrypted)
+        .execute(&state.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        let error = state
+            .client_for_connection(Some(proxy_id), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "PROXY_UNAVAILABLE");
+        let missing = state
+            .client_for_connection(Some(proxy_id + 100), None)
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code, "PROXY_UNAVAILABLE");
     }
 }
