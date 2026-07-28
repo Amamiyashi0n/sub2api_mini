@@ -324,6 +324,15 @@ pub async fn enforce(state: &AppState, row: &ApiKeyRow, peer_ip: Option<IpAddr>)
         }
     }
 
+    if row.quota_tokens == 0
+        && row.quota_cost_microusd == 0
+        && row.rate_limit_5h_microusd == 0
+        && row.rate_limit_1d_microusd == 0
+        && row.rate_limit_7d_microusd == 0
+    {
+        return Ok(());
+    }
+
     let usage: (i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT \
          COALESCE(SUM(CASE WHEN ? IS NULL OR datetime(created_at) >= datetime(?) \
@@ -494,6 +503,31 @@ fn batch_update_sql(action: &str, owned: bool) -> &'static str {
 mod tests {
     use super::*;
 
+    fn unrestricted_key() -> ApiKeyRow {
+        ApiKeyRow {
+            id: 1,
+            user_id: None,
+            name: "unrestricted".into(),
+            token_prefix: "sk-mini-test".into(),
+            token_hash: "hash".into(),
+            enabled: true,
+            last_used_at: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            expires_at: None,
+            quota_tokens: 0,
+            quota_cost_microusd: 0,
+            quota_reset_at: None,
+            allowed_models: "[]".into(),
+            group_id: None,
+            ip_whitelist: "[]".into(),
+            ip_blacklist: "[]".into(),
+            rate_limit_5h_microusd: 0,
+            rate_limit_1d_microusd: 0,
+            rate_limit_7d_microusd: 0,
+            rate_usage_reset_at: None,
+        }
+    }
+
     #[test]
     fn normalizes_and_matches_ip_policies() {
         let whitelist = normalize_networks(
@@ -538,5 +572,13 @@ mod tests {
         .unwrap();
         assert!(issue_token(&state.pool, Some(custom.into())).await.is_err());
         assert!(issue_token(&state.pool, Some("weak".into())).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn unrestricted_keys_do_not_query_usage_logs() {
+        let (_directory, state) = crate::test_support::state().await;
+        state.pool.close().await;
+
+        enforce(&state, &unrestricted_key(), None).await.unwrap();
     }
 }

@@ -179,6 +179,7 @@ pub async fn complete_flow(
         .execute(&state.pool)
         .await?;
     }
+    state.scheduler.invalidate().await;
     Ok(completed)
 }
 
@@ -247,6 +248,7 @@ async fn replace_oauth_credentials(
     .execute(&state.pool)
     .await?;
     state.model_cache.lock().await.remove(&account_id);
+    state.scheduler.invalidate().await;
     Ok(())
 }
 
@@ -312,6 +314,7 @@ pub async fn insert_oauth_account(
     .bind(concurrency)
     .execute(&state.pool)
     .await?;
+    state.scheduler.invalidate().await;
     Ok(result.last_insert_rowid())
 }
 
@@ -486,6 +489,7 @@ async fn refresh_account_inner(
     .execute(&state.pool)
     .await?;
     account.credentials = updated;
+    state.scheduler.invalidate().await;
     Ok(())
 }
 

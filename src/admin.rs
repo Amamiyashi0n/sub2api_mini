@@ -510,6 +510,7 @@ async fn create_account(
     .bind(input.tls_fingerprint_profile_id)
     .execute(&state.pool)
     .await?;
+    state.scheduler.invalidate().await;
     Ok((
         StatusCode::CREATED,
         Json(json!({"data": {"id": result.last_insert_rowid()}})),
@@ -755,6 +756,7 @@ async fn update_account(
         .bind(id)
         .execute(&state.pool)
         .await?;
+        state.scheduler.invalidate().await;
         return Ok(Json(json!({"data": {"id": id}})));
     }
     let name = input.name.unwrap_or_else(|| row.name.clone());
@@ -820,6 +822,7 @@ async fn update_account(
     if proxy_changed || tls_profile_changed {
         state.tls_clients.lock().await.clear();
     }
+    state.scheduler.invalidate().await;
     Ok(Json(json!({"data": {"id": id}})))
 }
 
@@ -834,6 +837,7 @@ async fn delete_account(
     if result.rows_affected() == 0 {
         return Err(ApiError::not_found("account not found"));
     }
+    state.scheduler.invalidate().await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -972,6 +976,7 @@ async fn bulk_update_accounts(
     if proxy_changed {
         state.tls_clients.lock().await.clear();
     }
+    state.scheduler.invalidate().await;
     Ok(Json(
         json!({"data": account_batch_result(success_ids, errors)}),
     ))
@@ -1000,6 +1005,7 @@ async fn batch_clear_accounts(
         }
     }
     transaction.commit().await?;
+    state.scheduler.invalidate().await;
     Ok(Json(
         json!({"data": account_batch_result(success_ids, errors)}),
     ))
@@ -1025,6 +1031,7 @@ async fn batch_delete_accounts(
         }
     }
     transaction.commit().await?;
+    state.scheduler.invalidate().await;
     Ok(Json(
         json!({"data": account_batch_result(success_ids, errors)}),
     ))
@@ -1061,6 +1068,7 @@ async fn batch_refresh_accounts(
             Err(error) => errors.push((id, error.message)),
         }
     }
+    state.scheduler.invalidate().await;
     Ok(Json(
         json!({"data": account_batch_result(success_ids, errors)}),
     ))
@@ -1080,6 +1088,7 @@ async fn recover_account(
     if result.rows_affected() == 0 {
         return Err(ApiError::not_found("account not found"));
     }
+    state.scheduler.invalidate().await;
     Ok(Json(json!({"data": {"id": id, "recovered": true}})))
 }
 

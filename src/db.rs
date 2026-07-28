@@ -28,11 +28,11 @@ pub async fn connect(
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .statement_cache_capacity(32)
-        .pragma("cache_size", "-512")
+        .pragma("cache_size", "-1024")
         .busy_timeout(Duration::from_secs(5));
 
     let pool = SqlitePoolOptions::new()
-        .max_connections(2)
+        .max_connections(4)
         .idle_timeout(Duration::from_secs(30))
         .connect_with(options)
         .await?;

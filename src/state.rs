@@ -37,6 +37,7 @@ pub struct AppState {
     pub active_requests: Arc<AtomicUsize>,
     pub prompt_audit_slots: Arc<DynamicSlots>,
     pub tls_clients: Arc<Mutex<HashMap<String, Client>>>,
+    key_activity: Arc<Mutex<HashMap<i64, KeyActivity>>>,
 }
 
 impl AppState {
@@ -64,6 +65,7 @@ impl AppState {
             active_requests: Arc::new(AtomicUsize::new(0)),
             prompt_audit_slots: Arc::new(DynamicSlots::default()),
             tls_clients: Arc::new(Mutex::new(HashMap::new())),
+            key_activity: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -262,6 +264,35 @@ impl AppState {
         self.active_requests.fetch_add(1, Ordering::Relaxed);
         ActiveRequestGuard(self.active_requests.clone())
     }
+
+    pub async fn should_record_key_activity(&self, key_id: i64) -> bool {
+        let mut activity = self.key_activity.lock().await;
+        if activity.len() >= 4_096 {
+            activity.retain(|_, item| item.recorded_at.elapsed() < Duration::from_secs(3_600));
+            if activity.len() >= 4_096
+                && !activity.contains_key(&key_id)
+                && let Some(oldest) = activity
+                    .iter()
+                    .min_by_key(|(_, item)| item.recorded_at)
+                    .map(|(id, _)| *id)
+            {
+                activity.remove(&oldest);
+            }
+        }
+        if activity
+            .get(&key_id)
+            .is_some_and(|item| item.recorded_at.elapsed() < KEY_ACTIVITY_INTERVAL)
+        {
+            return false;
+        }
+        activity.insert(
+            key_id,
+            KeyActivity {
+                recorded_at: Instant::now(),
+            },
+        );
+        true
+    }
 }
 
 pub struct ActiveRequestGuard(Arc<AtomicUsize>);
@@ -359,10 +390,25 @@ pub struct CachedVertexToken {
     pub expires_at: Instant,
 }
 
+#[derive(Clone)]
+struct KeyActivity {
+    recorded_at: Instant,
+}
+
+const KEY_ACTIVITY_INTERVAL: Duration = Duration::from_secs(30);
+const ACCOUNT_SNAPSHOT_TTL: Duration = Duration::from_millis(250);
+
+#[derive(Clone)]
+struct AccountSnapshot {
+    loaded_at: Instant,
+    rows: Arc<Vec<AccountRow>>,
+}
+
 #[derive(Default)]
 pub struct Scheduler {
     cursors: Mutex<HashMap<i32, usize>>,
     semaphores: Mutex<HashMap<i64, (i32, Arc<Semaphore>)>>,
+    snapshots: Mutex<HashMap<Option<i64>, AccountSnapshot>>,
 }
 
 pub struct ScheduledAccount {
@@ -371,6 +417,10 @@ pub struct ScheduledAccount {
 }
 
 impl Scheduler {
+    pub async fn invalidate(&self) {
+        self.snapshots.lock().await.clear();
+    }
+
     pub async fn active_for(&self, account_id: i64, concurrency: i32) -> usize {
         self.semaphores
             .lock()
@@ -382,6 +432,73 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
+    async fn account_rows(
+        &self,
+        state: &AppState,
+        group_id: Option<i64>,
+    ) -> ApiResult<Arc<Vec<AccountRow>>> {
+        if let Some(rows) = self
+            .snapshots
+            .lock()
+            .await
+            .get(&group_id)
+            .filter(|snapshot| snapshot.loaded_at.elapsed() < ACCOUNT_SNAPSHOT_TTL)
+            .map(|snapshot| snapshot.rows.clone())
+        {
+            return Ok(rows);
+        }
+
+        let rows = Arc::new(
+            sqlx::query_as::<_, AccountRow>(
+                "SELECT accounts.id, accounts.name, accounts.kind, accounts.platform, \
+                 accounts.account_type, accounts.base_url, \
+                 accounts.encrypted_credentials, accounts.priority, accounts.concurrency, \
+                 accounts.enabled, accounts.cooldown_until, accounts.last_used_at, \
+                 accounts.last_error, accounts.proxy_id, proxies.name AS proxy_name, \
+                 CASE WHEN proxies.id IS NULL THEN NULL WHEN proxies.enabled = 1 \
+                 AND (proxies.expires_at IS NULL OR datetime(proxies.expires_at) > CURRENT_TIMESTAMP) \
+                 THEN 1 WHEN proxies.fallback_mode = 'direct' THEN 1 WHEN proxies.fallback_mode = 'proxy' \
+                 AND backup_proxies.enabled = 1 AND (backup_proxies.expires_at IS NULL OR \
+                 datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END AS proxy_active, \
+                 CASE WHEN proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
+                 datetime(proxies.expires_at) > CURRENT_TIMESTAMP) THEN proxies.encrypted_url \
+                 WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
+                 (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) \
+                 THEN backup_proxies.encrypted_url ELSE NULL END AS encrypted_proxy_url, \
+                 accounts.parent_account_id, accounts.quota_dimension, accounts.notes, \
+                 accounts.crs_account_id, accounts.tls_fingerprint_profile_id, \
+                 accounts.created_at, accounts.updated_at FROM accounts \
+                 LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
+                 LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
+                 WHERE accounts.enabled = 1 AND (accounts.proxy_id IS NULL OR \
+                 (proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
+                 datetime(proxies.expires_at) > CURRENT_TIMESTAMP)) OR proxies.fallback_mode = 'direct' OR \
+                 (proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
+                 (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP))) \
+                 AND (cooldown_until IS NULL OR datetime(cooldown_until) <= CURRENT_TIMESTAMP) \
+                 AND (? IS NULL OR EXISTS (SELECT 1 FROM account_groups \
+                 WHERE account_groups.account_id = accounts.id AND account_groups.group_id = ?)) \
+                 ORDER BY accounts.priority ASC, accounts.id ASC",
+            )
+            .bind(group_id)
+            .bind(group_id)
+            .fetch_all(&state.pool)
+            .await?,
+        );
+        let mut snapshots = self.snapshots.lock().await;
+        if snapshots.len() >= 64 && !snapshots.contains_key(&group_id) {
+            snapshots.clear();
+        }
+        snapshots.insert(
+            group_id,
+            AccountSnapshot {
+                loaded_at: Instant::now(),
+                rows: rows.clone(),
+            },
+        );
+        Ok(rows)
+    }
+
     pub async fn select(
         &self,
         state: &AppState,
@@ -389,43 +506,9 @@ impl Scheduler {
         group_id: Option<i64>,
         platform: &str,
     ) -> ApiResult<ScheduledAccount> {
-        let rows = sqlx::query_as::<_, AccountRow>(
-            "SELECT accounts.id, accounts.name, accounts.kind, accounts.platform, \
-             accounts.account_type, accounts.base_url, \
-             accounts.encrypted_credentials, accounts.priority, accounts.concurrency, \
-             accounts.enabled, accounts.cooldown_until, accounts.last_used_at, \
-             accounts.last_error, accounts.proxy_id, proxies.name AS proxy_name, \
-             CASE WHEN proxies.id IS NULL THEN NULL WHEN proxies.enabled = 1 \
-             AND (proxies.expires_at IS NULL OR datetime(proxies.expires_at) > CURRENT_TIMESTAMP) \
-             THEN 1 WHEN proxies.fallback_mode = 'direct' THEN 1 WHEN proxies.fallback_mode = 'proxy' \
-             AND backup_proxies.enabled = 1 AND (backup_proxies.expires_at IS NULL OR \
-             datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) THEN 1 ELSE 0 END AS proxy_active, \
-             CASE WHEN proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
-             datetime(proxies.expires_at) > CURRENT_TIMESTAMP) THEN proxies.encrypted_url \
-             WHEN proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
-             (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP) \
-             THEN backup_proxies.encrypted_url ELSE NULL END AS encrypted_proxy_url, \
-             accounts.parent_account_id, accounts.quota_dimension, accounts.notes, \
-             accounts.crs_account_id, accounts.tls_fingerprint_profile_id, \
-             accounts.created_at, accounts.updated_at FROM accounts \
-             LEFT JOIN proxies ON proxies.id = accounts.proxy_id \
-             LEFT JOIN proxies AS backup_proxies ON backup_proxies.id = proxies.backup_proxy_id \
-             WHERE accounts.enabled = 1 AND (accounts.proxy_id IS NULL OR \
-             (proxies.enabled = 1 AND (proxies.expires_at IS NULL OR \
-             datetime(proxies.expires_at) > CURRENT_TIMESTAMP)) OR proxies.fallback_mode = 'direct' OR \
-             (proxies.fallback_mode = 'proxy' AND backup_proxies.enabled = 1 AND \
-             (backup_proxies.expires_at IS NULL OR datetime(backup_proxies.expires_at) > CURRENT_TIMESTAMP))) \
-             AND (cooldown_until IS NULL OR datetime(cooldown_until) <= CURRENT_TIMESTAMP) \
-             AND (? IS NULL OR EXISTS (SELECT 1 FROM account_groups \
-             WHERE account_groups.account_id = accounts.id AND account_groups.group_id = ?)) \
-             ORDER BY accounts.priority ASC, accounts.id ASC",
-        )
-        .bind(group_id)
-        .bind(group_id)
-        .fetch_all(&state.pool)
-        .await?;
+        let rows = self.account_rows(state, group_id).await?;
         let rows = rows
-            .into_iter()
+            .iter()
             .filter(|row| match platform {
                 "openai_responses" => matches!(row.platform.as_str(), "openai" | "grok"),
                 "openai_chat" | "openai_models" => {
@@ -441,6 +524,7 @@ impl Scheduler {
                 }
                 value => row.platform == value,
             })
+            .cloned()
             .collect::<Vec<_>>();
 
         let mut priorities = Vec::new();
@@ -507,6 +591,7 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use crate::test_support;
+    use std::collections::HashSet;
 
     #[tokio::test]
     async fn pending_connection_honors_backup_and_direct_proxy_fallbacks() {
@@ -587,5 +672,48 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(missing.code, "PROXY_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn throttles_repeated_key_activity_writes() {
+        let (_directory, state) = test_support::state().await;
+
+        assert!(state.should_record_key_activity(7).await);
+        assert!(!state.should_record_key_activity(7).await);
+        assert!(!state.should_record_key_activity(7).await);
+        assert!(state.should_record_key_activity(8).await);
+    }
+
+    #[tokio::test]
+    async fn caches_and_invalidates_scheduler_snapshots() {
+        let (_directory, state) = test_support::state().await;
+        let credentials = state.crypto.encrypt(br#"{"api_key":"upstream"}"#).unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (name, kind, base_url, encrypted_credentials) \
+             VALUES ('cached', 'api_key', 'https://api.openai.com', ?)",
+        )
+        .bind(credentials)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let selected = state
+            .scheduler
+            .select(&state, &HashSet::new(), None, "openai")
+            .await
+            .unwrap();
+        drop(selected);
+        assert_eq!(state.scheduler.snapshots.lock().await.len(), 1);
+
+        let selected = state
+            .scheduler
+            .select(&state, &HashSet::new(), None, "openai")
+            .await
+            .unwrap();
+        drop(selected);
+        assert_eq!(state.scheduler.snapshots.lock().await.len(), 1);
+
+        state.scheduler.invalidate().await;
+        assert!(state.scheduler.snapshots.lock().await.is_empty());
     }
 }

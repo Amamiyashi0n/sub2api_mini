@@ -1,6 +1,6 @@
 [package]
 name = "sub2api_mini"
-version = "0.2.76"
+version = "0.2.77"
 edition = "2024"
 
 [dependencies]

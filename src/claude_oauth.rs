@@ -302,6 +302,7 @@ pub async fn refresh_account(
     .execute(&state.pool)
     .await?;
     account.credentials = updated;
+    state.scheduler.invalidate().await;
     Ok(())
 }
 

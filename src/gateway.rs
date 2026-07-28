@@ -263,18 +263,21 @@ pub(crate) async fn api_key_guard(
         group_id: row.group_id,
     };
     request.extensions_mut().insert(context);
-    let pool = state.pool.clone();
     let peer_ip = peer_ip.map(|ip| ip.to_string());
-    tokio::spawn(async move {
-        let _ = sqlx::query(
-            "UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP, last_used_ip = ?, \
-             updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        )
-        .bind(peer_ip)
-        .bind(row.id)
-        .execute(&pool)
-        .await;
-    });
+    if state.should_record_key_activity(row.id).await {
+        let pool = state.pool.clone();
+        let key_id = row.id;
+        tokio::spawn(async move {
+            let _ = sqlx::query(
+                "UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP, last_used_ip = ?, \
+                 updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(peer_ip)
+            .bind(key_id)
+            .execute(&pool)
+            .await;
+        });
+    }
     Ok(next.run(request).await)
 }
 
@@ -1223,7 +1226,7 @@ async fn cool_down_account(
         state.runtime_settings.read().await.cooldown_5xx_seconds
     };
     let until = Utc::now() + ChronoDuration::seconds(seconds);
-    let _ = sqlx::query(
+    let result = sqlx::query(
         "UPDATE accounts SET cooldown_until = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
     .bind(until.to_rfc3339())
@@ -1231,12 +1234,15 @@ async fn cool_down_account(
     .bind(id)
     .execute(&state.pool)
     .await;
+    if result.is_ok() {
+        state.scheduler.invalidate().await;
+    }
 }
 
 async fn mark_transport_error(state: &AppState, id: i64, error: &ApiError) {
     let seconds = state.runtime_settings.read().await.cooldown_5xx_seconds;
     let until = Utc::now() + ChronoDuration::seconds(seconds);
-    let _ = sqlx::query(
+    let result = sqlx::query(
         "UPDATE accounts SET cooldown_until = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
     .bind(until.to_rfc3339())
@@ -1244,6 +1250,9 @@ async fn mark_transport_error(state: &AppState, id: i64, error: &ApiError) {
     .bind(id)
     .execute(&state.pool)
     .await;
+    if result.is_ok() {
+        state.scheduler.invalidate().await;
+    }
 }
 
 async fn clear_account_error(state: &AppState, id: i64) {

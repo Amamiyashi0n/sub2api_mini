@@ -270,6 +270,7 @@ async fn create(
     .bind(expires_at)
     .execute(&state.pool)
     .await?;
+    state.scheduler.invalidate().await;
     let row = get_row(&state, result.last_insert_rowid()).await?;
     Ok((
         StatusCode::CREATED,
@@ -337,6 +338,8 @@ async fn update(
     .bind(id)
     .execute(&state.pool)
     .await?;
+    state.tls_clients.lock().await.clear();
+    state.scheduler.invalidate().await;
     let row = get_row(&state, id).await?;
     Ok(Json(json!({"data": row.public(&state)?})))
 }
@@ -364,6 +367,8 @@ async fn delete(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult
     if result.rows_affected() == 0 {
         return Err(ApiError::not_found("proxy not found"));
     }
+    state.tls_clients.lock().await.clear();
+    state.scheduler.invalidate().await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -694,6 +699,8 @@ async fn batch_create(
         .execute(&state.pool)
         .await?;
     }
+    state.tls_clients.lock().await.clear();
+    state.scheduler.invalidate().await;
     Ok(Json(
         json!({"data": {"created": created, "skipped": skipped}}),
     ))
@@ -999,6 +1006,7 @@ mod tests {
             .execute(&state.pool)
             .await
             .unwrap();
+        state.scheduler.invalidate().await;
         let error = match state
             .scheduler
             .select(&state, &HashSet::new(), None, "openai")
@@ -1061,6 +1069,7 @@ mod tests {
         .execute(&state.pool)
         .await
         .unwrap();
+        state.scheduler.invalidate().await;
         let selected = state
             .scheduler
             .select(&state, &HashSet::new(), None, "openai")

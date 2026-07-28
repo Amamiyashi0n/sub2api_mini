@@ -13,6 +13,7 @@ use sqlx::FromRow;
 use tokio_rustls::rustls::{self, RootCertStore};
 
 use crate::{
+    crypto::token_hash,
     error::{ApiError, ApiResult},
     models::Account,
     state::{AppState, build_http_client},
@@ -362,24 +363,27 @@ pub(crate) async fn client_for_settings(
     profile_id: Option<i64>,
     proxy_url: Option<&str>,
 ) -> ApiResult<Client> {
-    let Some(profile_id) = profile_id else {
-        return match proxy_url {
-            Some(proxy) => build_http_client(Some(proxy)),
-            None => Ok(state.client.clone()),
-        };
-    };
-    let profile = find_profile(state, profile_id).await?;
+    if profile_id.is_none() && proxy_url.is_none() {
+        return Ok(state.client.clone());
+    }
+    let proxy_key = proxy_url.map(token_hash).unwrap_or_else(|| "direct".into());
     let cache_key = format!(
-        "{}:{}:{}",
-        profile.id,
-        profile.updated_at,
-        proxy_url.unwrap_or("")
+        "profile:{}:proxy:{proxy_key}",
+        profile_id.map_or_else(|| "default".into(), |id| id.to_string())
     );
     if let Some(client) = state.tls_clients.lock().await.get(&cache_key).cloned() {
         return Ok(client);
     }
-    let client = build_profile_client(&profile, proxy_url)?;
+    let client = if let Some(profile_id) = profile_id {
+        let profile = find_profile(state, profile_id).await?;
+        build_profile_client(&profile, proxy_url)?
+    } else {
+        build_http_client(proxy_url)?
+    };
     let mut cache = state.tls_clients.lock().await;
+    if let Some(existing) = cache.get(&cache_key).cloned() {
+        return Ok(existing);
+    }
     if cache.len() >= 32 {
         cache.clear();
     }
@@ -489,5 +493,22 @@ mod tests {
             vec!["http/1.1"]
         );
         assert!(build_profile_client(&stored, None).is_ok());
+    }
+
+    #[tokio::test]
+    async fn reuses_proxy_clients_without_exposing_proxy_credentials() {
+        let (_directory, state) = crate::test_support::state().await;
+        let proxy = "http://proxy-user:proxy-secret@127.0.0.1:3128";
+
+        client_for_settings(&state, None, Some(proxy))
+            .await
+            .unwrap();
+        client_for_settings(&state, None, Some(proxy))
+            .await
+            .unwrap();
+
+        let cache = state.tls_clients.lock().await;
+        assert_eq!(cache.len(), 1);
+        assert!(!cache.keys().next().unwrap().contains("proxy-secret"));
     }
 }

@@ -54,7 +54,7 @@ async fn status(State(state): State<AppState>) -> ApiResult<Json<Value>> {
             "engine": "SQLite",
             "migration_version": migration_version,
             "journal_mode": journal_mode,
-            "max_connections": 2
+            "max_connections": 4
         },
         "listeners": {
             "main": state.config.bind.to_string(),
@@ -75,6 +75,7 @@ mod tests {
         assert_eq!(value["data"]["needs_setup"], false);
         assert_eq!(value["data"]["checks"]["database_connected"], true);
         assert_eq!(value["data"]["checks"]["redis_required"], false);
+        assert_eq!(value["data"]["database"]["max_connections"], 4);
         let serialized = value.to_string();
         assert!(!serialized.contains("test-password"));
         assert!(!serialized.contains("CQkJCQkJCQkJ"));
